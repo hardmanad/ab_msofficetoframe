@@ -1,0 +1,35 @@
+application:
+  actions: actions
+  web: web-src
+  hooks:
+    post-app-build: node scripts/post-build.cjs
+  runtimeManifest:
+    packages:
+      msofficetoframe:
+        actions:
+          status:
+            function: actions/status/index.js
+            web: 'yes'
+            runtime: nodejs:22
+            annotations:
+              require-adobe-auth: false
+              final: true
+            limits:
+              timeout: 5000
+              memorySize: 128
+          oauth:
+            function: actions/oauth/index.js
+            web: 'yes'
+            runtime: nodejs:22
+            inputs:
+              FRAMEIO_CLIENT_ID: $FRAMEIO_CLIENT_ID
+              FRAMEIO_CLIENT_SECRET: $FRAMEIO_CLIENT_SECRET
+              FRAMEIO_REDIRECT_URI: $FRAMEIO_REDIRECT_URI
+              FRAMEIO_SCOPES: $FRAMEIO_SCOPES
+              FRAMEIO_TOKEN_KEY: $FRAMEIO_TOKEN_KEY
+            annotations:
+              require-adobe-auth: false
+              final: true
+            limits:
+              timeout: 60000
+              memorySize: 256

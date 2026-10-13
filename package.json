@@ -1,0 +1,60 @@
+{
+  "name": "msofficetoframe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone PowerPoint task pane hosted by Adobe App Builder",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "targets": {
+    "default": {
+      "context": "browser",
+      "includeNodeModules": true,
+      "engines": {
+        "browsers": [
+          "Chrome >= 109",
+          "Edge >= 109",
+          "Safari >= 16.4"
+        ]
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && aio app build && npm run check:secrets",
+    "check:secrets": "node scripts/check-secrets.cjs",
+    "dev": "node scripts/dev.cjs",
+    "certs": "node scripts/certs.cjs",
+    "oauth:configure": "node scripts/configure-oauth.cjs",
+    "manifest:local": "node scripts/manifest.cjs --url https://www.localappbuilder.com:3000/index.html --output office/manifest.local.xml",
+    "manifest": "node scripts/manifest.cjs",
+    "validate:manifest": "office-addin-manifest validate office/manifest.local.xml",
+    "assets": "node scripts/assets.cjs"
+  },
+  "dependencies": {
+    "@adobe/aio-lib-files": "^4.1.4",
+    "@adobe/aio-lib-state": "^5.4.0",
+    "dotenv": "^18.0.0",
+    "lucide-react": "^0.468.0",
+    "oauth4webapi": "^3.8.8",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@parcel/config-default": "^2.16.4",
+    "@types/office-js": "^1.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "fast-xml-parser": "^5.0.0",
+    "office-addin-dev-certs": "^3.0.1",
+    "office-addin-manifest": "^3.0.1",
+    "parcel": "^2.16.4",
+    "serve-handler": "^6.1.6",
+    "sharp": "^0.35.5",
+    "typescript": "^5.9.0"
+  },
+  "@parcel/transformer-js": {
+    "inlineEnvironment": false
+  }
+}

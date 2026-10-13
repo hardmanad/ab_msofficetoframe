@@ -1,0 +1,4 @@
+{
+  "statusUrl": "https://27200-msofficetoframe-stage.adobeio-static.net/api/v1/web/msofficetoframe/status",
+  "oauthUrl": "https://27200-msofficetoframe-stage.adobeio-static.net/api/v1/web/msofficetoframe/oauth"
+}
