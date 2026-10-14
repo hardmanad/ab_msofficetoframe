@@ -23,12 +23,12 @@ function createManifest(taskpaneUrl) {
       ProviderName: 'MSOffice to Frame',
       DefaultLocale: 'en-US',
       DisplayName: { '@_DefaultValue': 'Frame.io' },
-      Description: { '@_DefaultValue': 'Upload PowerPoint presentations to Frame.io with persistent document tracking.' },
+      Description: { '@_DefaultValue': 'Upload PowerPoint presentations and Word documents to Frame.io with persistent document tracking.' },
       IconUrl: { '@_DefaultValue': icon(32) },
       HighResolutionIconUrl: { '@_DefaultValue': icon(64) },
       SupportUrl: { '@_DefaultValue': url.href },
       AppDomains: { AppDomain: url.origin },
-      Hosts: { Host: { '@_Name': 'Presentation' } },
+      Hosts: { Host: [{ '@_Name': 'Presentation' }, { '@_Name': 'Document' }] },
       DefaultSettings: { SourceLocation: { '@_DefaultValue': url.href } },
       Permissions: 'ReadWriteDocument'
     }

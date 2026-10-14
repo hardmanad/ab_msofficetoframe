@@ -46,14 +46,18 @@ async function verifyAsset(entry, request, RequestError) {
 }
 
 async function finalizeUpload(record, registry, request, RequestError, now = Date.now) {
+  const documentType = record.documentType === undefined ? 'pptx' : record.documentType
+  if (!['pptx', 'docx'].includes(documentType)) throw new RequestError(409, 'Invalid tracked document type.')
   const priorEvent = await registry.event(record.presentationId, record.uploadId)
   if (priorEvent?.state === 'complete') {
+    if ((priorEvent.documentType === undefined ? 'pptx' : priorEvent.documentType) !== documentType) throw new RequestError(409, 'The registered upload has a different document type.')
     await registry.record(record.presentationId, priorEvent)
     return priorEvent
   }
   const current = await registry.latest(record.presentationId)
   const previous = current || record.previous
-  if (previous && (previous.accountId !== record.accountId || previous.projectId !== record.projectId || previous.folderId !== record.folderId)) throw new RequestError(409, 'This presentation is already linked to another destination. No new asset was registered.')
+  if (previous && (previous.documentType === undefined ? 'pptx' : previous.documentType) !== documentType) throw new RequestError(409, 'New versions must use the existing document type. No new asset was registered.')
+  if (previous && (previous.accountId !== record.accountId || previous.projectId !== record.projectId || previous.folderId !== record.folderId)) throw new RequestError(409, 'This document is already linked to another destination. No new asset was registered.')
   const base = `/v4/accounts/${record.accountId}`
   const file = (await request(`${base}/files/${record.fileId}`)).data
   if (file?.id !== record.fileId || file.project_id !== record.projectId) throw new RequestError(502, 'Frame.io returned an inconsistent uploaded file.')
@@ -84,7 +88,7 @@ async function finalizeUpload(record, registry, request, RequestError, now = Dat
     }
   } else if (file.parent_id !== record.folderId) throw new RequestError(409, 'The uploaded file is no longer in the selected destination.')
   const entry = {
-    presentationId: record.presentationId, uploadId: record.uploadId, accountId: record.accountId,
+    presentationId: record.presentationId, documentType, uploadId: record.uploadId, accountId: record.accountId,
     projectId: record.projectId, folderId: record.folderId, name: record.name, fileSize: record.fileSize,
     fileId: record.fileId, ...(stackId ? { stackId } : {}), viewUrl: viewUrl(asset.view_url, RequestError),
     state: 'complete', version: (previous?.version || 0) + 1,

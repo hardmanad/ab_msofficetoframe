@@ -11,7 +11,7 @@ class RequestError extends Error { constructor(status, message) { super(message)
 const presentationId = '12345678-1234-1234-1234-123456789abc'
 const uploadIds = ['aaaaaaaa-1234-1234-1234-123456789abc', 'bbbbbbbb-1234-1234-1234-123456789abc', 'cccccccc-1234-1234-1234-123456789abc']
 
-test('durable registry keeps first upload and later versions across adapter restarts', async () => {
+for (const documentType of [undefined, 'docx']) test(`durable ${documentType || 'legacy PPTX'} registry keeps first upload and later versions across adapter restarts`, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'frameio-registry-'))
   try {
     let registry = localRegistry(directory)
@@ -30,7 +30,7 @@ test('durable registry keeps first upload and later versions across adapter rest
       if (url.endsWith('/version_stacks/stack')) return { data: { id: 'stack', project_id: 'project', parent_id: 'folder', view_url: 'https://next.frame.io/stack/stack' } }
       return { data: files.get(url.split('/').pop()) }
     }
-    const record = { presentationId, uploadId: uploadIds[0], accountId: 'account', projectId: 'project', folderId: 'folder', name: 'Deck.pptx', fileSize: 8, fileId: 'first', createdAt: new Date().toISOString() }
+    const record = { presentationId, ...(documentType ? { documentType } : {}), uploadId: uploadIds[0], accountId: 'account', projectId: 'project', folderId: 'folder', name: documentType === 'docx' ? 'Report.docx' : 'Deck.pptx', fileSize: 8, fileId: 'first', createdAt: new Date().toISOString() }
     assert.equal(await registry.latest(presentationId), undefined)
     const first = await finalizeUpload(record, registry, request, RequestError)
     assert.equal(first.version, 1)
@@ -45,6 +45,7 @@ test('durable registry keeps first upload and later versions across adapter rest
     files.set('third', { id: 'third', project_id: 'project', parent_id: 'folder', view_url: 'https://next.frame.io/file/third' })
     const third = await finalizeUpload({ ...record, fileId: 'third', uploadId: uploadIds[2] }, registry, request, RequestError)
     assert.equal(third.version, 3)
+    assert.equal(third.documentType, documentType || 'pptx')
     assert.equal(moves, 1)
     assert.equal((await localRegistry(directory).latest(presentationId)).fileId, 'third')
     await finalizeUpload(record, registry, request, RequestError)
@@ -55,6 +56,22 @@ test('durable registry keeps first upload and later versions across adapter rest
   } finally { await fs.rm(directory, { recursive: true, force: true }) }
 })
 
+test('finalization rejects changed document types before stack creation or moving files', async () => {
+  for (const previous of [{}, { documentType: 'pptx' }, { documentType: 'docx' }]) {
+    const record = { presentationId, uploadId: uploadIds[1], documentType: previous.documentType === 'docx' ? 'pptx' : 'docx' }
+    let requests = 0
+    const registry = { event: async () => undefined, latest: async () => previous }
+    await assert.rejects(finalizeUpload(record, registry, async () => { requests++; throw new Error('Must not request') }, RequestError), { status: 409 })
+    assert.equal(requests, 0)
+    registry.latest = async () => undefined
+    await assert.rejects(finalizeUpload({ ...record, previous }, registry, async () => { requests++ }, RequestError), { status: 409 })
+    assert.equal(requests, 0)
+    registry.event = async () => ({ ...previous, state: 'complete' })
+    await assert.rejects(finalizeUpload(record, registry, async () => { requests++ }, RequestError), { status: 409 })
+    assert.equal(requests, 0)
+  }
+})
+
 test('registry lookup verifies current Frame.io access and refuses moved assets or arbitrary links', async () => {
   const entry = { accountId: 'account', projectId: 'project', folderId: 'folder', fileId: 'file' }
   await assert.rejects(verifyAsset(entry, async () => { throw new RequestError(403, 'Denied') }, RequestError), { status: 403 })
@@ -62,13 +79,13 @@ test('registry lookup verifies current Frame.io access and refuses moved assets 
   await assert.rejects(verifyAsset(entry, async () => ({ data: { id: 'file', project_id: 'project', parent_id: 'folder', view_url: 'https://attacker.example/file' } }), RequestError), { status: 502 })
 })
 
-test('a lost version-stack response is recovered without creating a duplicate stack', async () => {
+for (const documentType of [undefined, 'docx']) test(`a lost ${documentType || 'legacy PPTX'} version-stack response is recovered without creating a duplicate stack`, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'frameio-stack-recovery-'))
   try {
     const registry = localRegistry(directory)
     const old = { id: 'old', project_id: 'project', parent_id: 'folder', view_url: 'https://next.frame.io/file/old' }
     const fresh = { id: 'fresh', project_id: 'project', parent_id: 'folder', view_url: 'https://next.frame.io/file/fresh' }
-    const first = { presentationId, uploadId: uploadIds[0], accountId: 'account', projectId: 'project', folderId: 'folder', fileId: 'old', name: 'Deck.pptx', fileSize: 8, state: 'complete', version: 1, viewUrl: old.view_url, completedAt: new Date().toISOString() }
+    const first = { presentationId, ...(documentType ? { documentType } : {}), uploadId: uploadIds[0], accountId: 'account', projectId: 'project', folderId: 'folder', fileId: 'old', name: documentType === 'docx' ? 'Report.docx' : 'Deck.pptx', fileSize: 8, state: 'complete', version: 1, viewUrl: old.view_url, completedAt: new Date().toISOString() }
     await registry.record(presentationId, first)
     let creates = 0
     const request = async (url, paginated, init) => {

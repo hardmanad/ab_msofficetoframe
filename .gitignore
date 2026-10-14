@@ -39,5 +39,6 @@ office/manifest.*.xml
 *.pfx.*
 *.pptx
 *.pptm
+*.docx
 ~$*
 .DS_Store

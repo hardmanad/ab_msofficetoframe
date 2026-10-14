@@ -24,7 +24,7 @@ application:
             inputs:
               FRAMEIO_CLIENT_ID: $FRAMEIO_CLIENT_ID
               FRAMEIO_CLIENT_SECRET: $FRAMEIO_CLIENT_SECRET
-              FRAMEIO_REDIRECT_URI: $FRAMEIO_REDIRECT_URI
+              FRAMEIO_REDIRECT_URI: https://27200-msofficetoframe-stage.adobeio-static.net/oauth-callback.html
               FRAMEIO_SCOPES: $FRAMEIO_SCOPES
               FRAMEIO_TOKEN_KEY: $FRAMEIO_TOKEN_KEY
             annotations:

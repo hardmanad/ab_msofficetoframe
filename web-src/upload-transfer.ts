@@ -2,6 +2,7 @@ export type UploadPart = { url: string; size: number }
 export type ByteSource = { size: number; read: (offset: number, size: number, signal: AbortSignal) => Promise<Uint8Array>; close: () => Promise<void> }
 export const maxFileSize = 1024 * 1024 * 1024
 export const pptxType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+export const docxType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 export class TransferError extends Error {
   constructor(message: string, public status = 0) { super(message) }
@@ -23,12 +24,13 @@ export function validateParts(parts: UploadPart[], size: number) {
     if (url.protocol !== 'https:' || !url.hostname.endsWith('.amazonaws.com') || url.username || url.password || url.hash || (url.port && url.port !== '443') || !Number.isSafeInteger(part.size) || part.size < 1 || part.size > 64 * 1024 * 1024) throw new Error('Unsupported upload plan.')
   }
   if (new Set(parts.map(part => part.url)).size !== parts.length) throw new Error('The upload plan contains duplicate part URLs.')
-  if (parts.reduce((total, part) => total + part.size, 0) !== size) throw new Error('The upload plan does not match the presentation size.')
+  if (parts.reduce((total, part) => total + part.size, 0) !== size) throw new Error('The upload plan does not match the document size.')
 }
 
-export function putPart(url: string, bytes: Uint8Array, progress: (loaded: number) => void, signal: AbortSignal): Promise<void> {
+export function putPart(url: string, bytes: Uint8Array, progress: (loaded: number) => void, signal: AbortSignal, mimeType = pptxType): Promise<void> {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted()
+    if (mimeType !== pptxType && mimeType !== docxType) throw new Error('Unsupported document content type.')
     const xhr = new XMLHttpRequest()
     const finish = (error?: Error) => {
       signal.removeEventListener('abort', abort)
@@ -39,7 +41,7 @@ export function putPart(url: string, bytes: Uint8Array, progress: (loaded: numbe
     xhr.open('PUT', url)
     xhr.timeout = 600000
     xhr.withCredentials = false
-    xhr.setRequestHeader('Content-Type', pptxType)
+    xhr.setRequestHeader('Content-Type', mimeType)
     xhr.setRequestHeader('x-amz-acl', 'private')
     xhr.upload.onprogress = event => progress(Math.min(event.loaded, bytes.length))
     xhr.onload = () => finish(xhr.status >= 200 && xhr.status < 300 ? undefined : new TransferError(xhr.status === 403 ? 'Upload permission or URL expiry prevented transfer. Check Frame.io before starting again.' : 'A file part could not be transferred.', xhr.status))
@@ -69,7 +71,7 @@ export async function transferParts(source: ByteSource, parts: UploadPart[], pro
         const index = next++
         const part = parts[index]
         const bytes = await source.read(offsets[index], part.size, combined)
-        if (bytes.length !== part.size) throw new Error('PowerPoint returned an incomplete file part.')
+        if (bytes.length !== part.size) throw new Error('Office returned an incomplete file part.')
         for (let attempt = 0; ; attempt++) {
           combined.throwIfAborted()
           try {
@@ -95,7 +97,7 @@ export async function transferParts(source: ByteSource, parts: UploadPart[], pro
   if (failure) throw failure
 }
 
-export async function openPresentation(signal: AbortSignal): Promise<ByteSource> {
+export async function openDocument(signal: AbortSignal): Promise<ByteSource> {
   const file = await officeCall<Office.File>(callback => Office.context.document.getFileAsync(Office.FileType.Compressed, { sliceSize: 1024 * 1024 }, callback), signal, result => result.closeAsync())
   let closed = false
   let queue: Promise<unknown> = Promise.resolve()
@@ -104,7 +106,7 @@ export async function openPresentation(signal: AbortSignal): Promise<ByteSource>
     read(offset, size, readSignal) {
       const task = queue.then(async () => {
         readSignal.throwIfAborted()
-        if (closed || offset < 0 || size < 1 || offset + size > file.size) throw new Error('Invalid presentation read.')
+        if (closed || offset < 0 || size < 1 || offset + size > file.size) throw new Error('Invalid document read.')
         const bytes = new Uint8Array(size)
         let copied = 0
         while (copied < size) {
@@ -114,7 +116,7 @@ export async function openPresentation(signal: AbortSignal): Promise<ByteSource>
           const data = new Uint8Array(slice.data)
           const start = position % (1024 * 1024)
           const count = Math.min(data.length - start, size - copied)
-          if (slice.index !== index || count <= 0 || data.length !== Math.min(1024 * 1024, file.size - index * 1024 * 1024)) throw new Error('PowerPoint returned an invalid presentation slice.')
+          if (slice.index !== index || count <= 0 || data.length !== Math.min(1024 * 1024, file.size - index * 1024 * 1024)) throw new Error('Office returned an invalid document slice.')
           bytes.set(data.subarray(start, start + count), copied)
           copied += count
         }
@@ -131,6 +133,8 @@ export async function openPresentation(signal: AbortSignal): Promise<ByteSource>
   }
 }
 
+export const openPresentation = openDocument
+
 function officeCall<Value>(invoke: (callback: (result: Office.AsyncResult<Value>) => void) => void, signal: AbortSignal, lateCleanup?: (value: Value) => void): Promise<Value> {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted()
@@ -144,14 +148,14 @@ function officeCall<Value>(invoke: (callback: (result: Office.AsyncResult<Value>
       else resolve(value as Value)
     }
     const abort = () => finish(new Error('Upload cancelled.'))
-    const timer = setTimeout(() => finish(new Error('PowerPoint file access timed out.')), 30000)
+    const timer = setTimeout(() => finish(new Error('Office document file access timed out.')), 30000)
     signal.addEventListener('abort', abort, { once: true })
     try {
       invoke(result => {
         if (settled) { if (result.status === Office.AsyncResultStatus.Succeeded) lateCleanup?.(result.value); return }
-        if (result.status !== Office.AsyncResultStatus.Succeeded) finish(new Error('PowerPoint could not access the presentation.'))
+        if (result.status !== Office.AsyncResultStatus.Succeeded) finish(new Error('Office could not access the document.'))
         else finish(undefined, result.value)
       })
-    } catch { finish(new Error('PowerPoint file access is unavailable.')) }
+    } catch { finish(new Error('Office document file access is unavailable.')) }
   })
 }

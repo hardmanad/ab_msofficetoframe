@@ -48,6 +48,52 @@ test('upload rejects unsafe names, oversize files and cross-project destinations
   }
 })
 
+test('DOCX uploads validate type and persist it through upload state and confirmation', async () => {
+  const { options, records, calls } = fixture({ documentType: 'docx', name: 'Report.DOCX' })
+  const presentationId = options.params.presentationId
+  const uploadId = options.params.uploadId
+  await uploadOperation(options)
+  assert.deepEqual(await uploadOperation(options), { fileId: 'file', parts: records.values().next().value.parts })
+  assert.equal(records.values().next().value.documentType, 'docx')
+  assert.equal((await options.registry.event(presentationId, uploadId)).documentType, 'docx')
+  assert.deepEqual(JSON.parse(calls.find(call => call.init?.method === 'POST').init.body), { data: { name: 'Report.DOCX', file_size: 8 } })
+  options.params = { operation: 'upload-status', uploadId }
+  const result = await uploadOperation(options)
+  assert.equal(result.entry.documentType, 'docx')
+  assert.equal(result.entry.version, 1)
+  await assert.rejects(uploadOperation({ ...options, identity: 'another-owner' }), { status: 404 })
+})
+
+test('document type mismatches and unsafe DOCX names fail before any remote creation', async () => {
+  for (const overrides of [
+    { documentType: 'xlsx', name: 'Book.xlsx' }, { documentType: null }, { documentType: 'DOCX', name: 'Report.docx' },
+    { documentType: 'docx' }, { name: 'Report.docx' },
+    ...['.docx', '../Report.docx', 'Report.docm', 'Report.doc', 'Report.dotx', 'Report\u0000.docx', 'a'.repeat(176) + '.docx'].map(name => ({ documentType: 'docx', name }))
+  ]) {
+    const { options, calls } = fixture(overrides)
+    await assert.rejects(uploadOperation(options), { status: 400 })
+    assert.equal(calls.length, 0)
+  }
+})
+
+test('legacy PPTX replay stays compatible but changed types and mixed version histories conflict', async () => {
+  const { options, records, calls } = fixture()
+  await uploadOperation(options)
+  const record = records.values().next().value
+  delete record.documentType
+  options.params.documentType = 'pptx'
+  assert.equal((await uploadOperation(options)).fileId, 'file')
+  record.documentType = 'docx'
+  await assert.rejects(uploadOperation(options), { status: 409 })
+  assert.equal(calls.filter(call => call.init?.method === 'POST').length, 1)
+  for (const previousType of [undefined, 'pptx']) {
+    const fresh = fixture({ documentType: 'docx', name: 'Report.docx' })
+    fresh.options.registry.latest = async () => ({ documentType: previousType, name: 'Renamed.docx' })
+    await assert.rejects(uploadOperation(fresh.options), { status: 409 })
+    assert.equal(fresh.calls.length, 0)
+  }
+})
+
 test('provider failures remain in durable history without becoming the current asset', async () => {
   const { options } = fixture()
   const presentationId = options.params.presentationId

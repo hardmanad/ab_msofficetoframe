@@ -24,20 +24,23 @@ async function uploadOperation({ params, identity, read, write, request, registr
     const entry = status.upload_complete && !status.upload_failed && existing.presentationId ? await finalizeUpload(existing, registry, request, RequestError, now) : undefined
     return { complete: status.upload_complete, failed: status.upload_failed, fileId: existing.fileId, ...(entry ? { entry } : {}) }
   }
-  if (typeof params.presentationId !== 'string' || !uuid.test(params.presentationId)) fail(400, 'A presentation tracking ID is required. Reload the updated add-in.')
+  if (typeof params.presentationId !== 'string' || !uuid.test(params.presentationId)) fail(400, 'A document tracking ID is required. Reload the updated add-in.')
   const accountId = id(params.accountId)
   const projectId = id(params.projectId)
   const folderId = id(params.folderId)
   const { name, fileSize } = params
-  if (typeof name !== 'string' || name.length <= 5 || name.length > 180 || !name.toLowerCase().endsWith('.pptx') || /[\x00-\x1f\x7f/\\]/.test(name)) fail(400, 'Provide a valid PPTX filename of at most 180 characters.')
-  if (!Number.isSafeInteger(fileSize) || fileSize < 1 || fileSize > maxFileSize) fail(400, 'Presentations must be between 1 byte and 1 GiB.')
+  const documentType = params.documentType === undefined ? 'pptx' : params.documentType
+  if (!['pptx', 'docx'].includes(documentType)) fail(400, 'Unsupported document type.')
+  if (typeof name !== 'string' || name.length <= 5 || name.length > 180 || !name.toLowerCase().endsWith('.' + documentType) || /[\x00-\x1f\x7f/\\]/.test(name)) fail(400, `Provide a valid ${documentType.toUpperCase()} filename of at most 180 characters.`)
+  if (!Number.isSafeInteger(fileSize) || fileSize < 1 || fileSize > maxFileSize) fail(400, 'Documents must be between 1 byte and 1 GiB.')
   if (existing) {
-    if (existing.presentationId !== params.presentationId || existing.accountId !== accountId || existing.projectId !== projectId || existing.folderId !== folderId || existing.name !== name || existing.fileSize !== fileSize) fail(409, 'The upload ID is already in use.')
+    if ((existing.documentType === undefined ? 'pptx' : existing.documentType) !== documentType || existing.presentationId !== params.presentationId || existing.accountId !== accountId || existing.projectId !== projectId || existing.folderId !== folderId || existing.name !== name || existing.fileSize !== fileSize) fail(409, 'The upload ID is already in use.')
     if (!existing.parts) fail(409, 'The upload start outcome is uncertain. Do not retry with a new ID until you check the destination for a duplicate.')
     return { fileId: existing.fileId, parts: existing.parts }
   }
   const previous = await registry.latest(params.presentationId)
   if (previous) {
+    if ((previous.documentType === undefined ? 'pptx' : previous.documentType) !== documentType) fail(409, 'New versions must use the existing document type.')
     await verifyAsset(previous, request, RequestError)
     if (previous.accountId !== accountId || previous.projectId !== projectId || previous.folderId !== folderId) fail(409, 'New versions must use the existing Frame.io destination.')
   }
@@ -47,7 +50,7 @@ async function uploadOperation({ params, identity, read, write, request, registr
     const folder = (await request(`/v4/accounts/${accountId}/folders/${folderId}`)).data
     if (folder?.project_id !== projectId) fail(403, 'The folder does not belong to this project.')
   }
-  const event = { presentationId: params.presentationId, uploadId: params.uploadId, accountId, projectId, folderId, name, fileSize, createdAt: new Date(now()).toISOString() }
+  const event = { presentationId: params.presentationId, documentType, uploadId: params.uploadId, accountId, projectId, folderId, name, fileSize, createdAt: new Date(now()).toISOString() }
   const record = { ...event, previous, expiresAt: now() + uploadTTL * 1000 }
   await write(key, record, uploadTTL)
   await registry.record(params.presentationId, { ...event, state: 'creating' })

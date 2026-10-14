@@ -7,7 +7,7 @@ export type FolderChoice = Choice & { parentId: string | null }
 export type BrowsingOperation = 'accounts' | 'projects' | 'folders'
 export type ChoicePage = { items: Choice[]; nextCursor: string | null; folder?: FolderChoice; rootId?: string }
 export type Destination = { accountId: string; projectId: string; folderId: string }
-export type RegistryEntry = Destination & { presentationId: string; uploadId: string; name: string; fileSize: number; fileId: string; stackId?: string; viewUrl: string; state: 'complete'; version: number; createdAt: string; completedAt: string }
+export type RegistryEntry = Destination & { presentationId: string; documentType?: 'pptx' | 'docx'; uploadId: string; name: string; fileSize: number; fileId: string; stackId?: string; viewUrl: string; state: 'complete'; version: number; createdAt: string; completedAt: string }
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message) }
@@ -53,7 +53,9 @@ export async function oauthRequest(operation: 'start' | 'callback' | 'session' |
     body: JSON.stringify({ operation, ...data }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000)
   })
-  const body = await response.json()
+  const body = await response.json().catch(() => {
+    throw new ApiError(response.ok ? 'Authentication service returned an invalid response.' : `Authentication service returned HTTP ${response.status} instead of JSON.`, response.ok ? 502 : response.status)
+  })
   if (!response.ok) throw new ApiError(typeof body.error === 'string' ? body.error : 'Authentication request failed.', response.status)
   return body as { authenticated?: boolean; authorizationUrl?: string; revoked?: boolean; fileId?: string; parts?: { url: string; size: number }[]; complete?: boolean; failed?: boolean; entry?: RegistryEntry | null } & Partial<ChoicePage>
 }

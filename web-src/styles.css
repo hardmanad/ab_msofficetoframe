@@ -13,6 +13,9 @@ h2 { font-size: 15px; line-height: 1.4; margin: 0; font-weight: 600; }
 .slide-preview { width: min(100%, 240px); aspect-ratio: 16 / 9; margin: 0 auto; display: grid; place-items: center; color: #858c92; background: #eef1f3; border: 1px solid var(--line); overflow: hidden; }
 .slide-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .presentation-preview figcaption { margin-top: 12px; font-size: 13px; line-height: 1.5; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+.document-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.document-name svg { flex: 0 0 20px; }
+.document-name p { margin: 0; font-size: 13px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .detail { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 10px 0 0; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .connection-menu { position: relative; flex: 0 0 auto; }

@@ -2,7 +2,7 @@
   "name": "msofficetoframe",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone PowerPoint task pane hosted by Adobe App Builder",
+  "description": "Standalone PowerPoint and Word task pane hosted by Adobe App Builder",
   "engines": {
     "node": ">=22 <23"
   },

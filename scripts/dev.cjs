@@ -66,7 +66,7 @@ const server = https.createServer({ cert: fs.readFileSync(cert), key: fs.readFil
           response.end(JSON.stringify({ error: 'Invalid JSON request.' }))
           return
         }
-        if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => !['operation', 'state', 'code', 'error', 'accountId', 'projectId', 'folderId', 'cursor', 'uploadId', 'name', 'fileSize', 'presentationId'].includes(key))) {
+        if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => !['operation', 'state', 'code', 'error', 'accountId', 'projectId', 'folderId', 'cursor', 'uploadId', 'name', 'fileSize', 'presentationId', 'documentType'].includes(key))) {
           response.writeHead(400, { 'Content-Type': 'application/json' })
           response.end(JSON.stringify({ error: 'Invalid request fields.' }))
           return

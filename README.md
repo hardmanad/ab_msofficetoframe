@@ -1,13 +1,23 @@
-# Frame.io for PowerPoint
+# Frame.io for PowerPoint and Word
 
-A PowerPoint task-pane add-in for uploading presentations to Frame.io. Sign in with your own Adobe account, choose an account, project, and folder, and upload the presentation. A tracking ID saved in the presentation links later uploads to the same Frame.io version history.
+A shared Office task-pane add-in for uploading PowerPoint presentations and Word documents to Frame.io. Sign in with your own Adobe account, choose an account, project, and folder, and upload the native file. A tracking ID saved in the document links later uploads to the same Frame.io version history.
 
-The frontend uses Office.js and React. Adobe App Builder handles authentication and upload history; presentation bytes upload directly to Frame.io.
+The frontend uses Office.js and React. Adobe App Builder handles authentication and upload history; document bytes upload directly to Frame.io, without conversion or staging.
+
+## Support
+
+| Host | File | Required APIs | Preview |
+| --- | --- | --- | --- |
+| PowerPoint, existing compressed-export-capable hosts | `.pptx` | CompressedFile 1.1, PowerPointApi 1.3 | First slide when PowerPointApi 1.8 is available |
+| Word on Mac and Windows desktop | `.docx` | CompressedFile 1.1, WordApi 1.3 | Deferred; document name only |
+| Word web/mobile and Excel | Not supported | Upload disabled | None |
+
+The Word path is implemented, but native acceptance on both desktop platforms remains a release gate. Automated/browser mocks do not establish Office export fidelity or live Frame.io DOCX acceptance. No minimum Office build is claimed beyond checked requirement sets. Legacy, macro-enabled, and template formats are rejected rather than relabeled as DOCX/PPTX.
 
 ## Requirements
 
 - Node.js 22, npm, and OpenSSL for local HTTPS certificates.
-- A supported PowerPoint installation with Office add-in sideloading enabled.
+- A supported PowerPoint or desktop Word installation with Office add-in sideloading enabled and document editing permitted when creating tracking metadata.
 - Your own Adobe App Builder project with Runtime, State, Files, and web hosting available.
 - Frame.io API v4 access and OAuth Web App credentials for user-based sign-in.
 
@@ -36,14 +46,14 @@ Never put credentials in frontend files or commit Console exports, private keys,
 
 ## Run Locally
 
-Register `https://www.localappbuilder.com:3000/oauth-callback.html` in your OAuth credentials and use it as the local `FRAMEIO_REDIRECT_URI`. Configure `www.localappbuilder.com` to resolve to your development server; for a container, use the address reachable from the PowerPoint host.
+Register `https://www.localappbuilder.com:3000/oauth-callback.html` in your OAuth credentials and use it as the local `FRAMEIO_REDIRECT_URI`. Configure `www.localappbuilder.com` to resolve to your development server; for a container, use the address reachable from the Office host.
 
 ```sh
 npm run certs
 npm run dev
 ```
 
-Trust the generated public certificate on the computer running PowerPoint. Do not share the TLS private key. Open `https://www.localappbuilder.com:3000/index.html` to check that the app loads without certificate errors.
+Trust the generated public certificate on the computer running Office. Do not share the TLS private key. Open `https://www.localappbuilder.com:3000/index.html` to check that the app loads without certificate errors.
 
 Generate and validate the local Office manifest, then sideload it using your platform's Office add-in procedure:
 
@@ -52,11 +62,15 @@ npm run manifest:local
 npm run validate:manifest
 ```
 
+The same manifest supports PowerPoint and Word. Sideload it separately in each application; replace an older PowerPoint-only manifest and restart Office if Word does not list the add-in. Keep `ReadWriteDocument` permission. Open a DOCX in desktop Word, not Word on the web.
+
 ## Deploy Your Workspace
 
-Use your workspace's static hosting origin from Adobe Developer Console. Register its `/oauth-callback.html` URL in your OAuth credentials and use that exact URL as `FRAMEIO_REDIRECT_URI` for both the build and deployment. Keep local and hosted redirect registrations separate if you use both environments.
+Use your workspace's static hosting origin from Adobe Developer Console. Register its `/oauth-callback.html` URL in your OAuth credentials and set that exact URL as the OAuth action's `FRAMEIO_REDIRECT_URI` input in [app.config.yaml](app.config.yaml). This repository pins that input to the Stage callback so a plain `aio app deploy` cannot accidentally deploy the localhost callback from `.env`. Local development still reads `.env`; keep local and hosted redirect registrations separate if you use both environments.
 
 Before building, update [the public endpoint configuration](web-src/public-config.json) with your own same-origin hosted action URLs. Also update the explicitly pinned hosted origin in [the authentication client](web-src/auth.ts). The action package paths remain `/api/v1/web/msofficetoframe/status` and `/api/v1/web/msofficetoframe/oauth` unless you rename the package.
+
+Release the additive DOCX-capable backend before the Word-enabled frontend. Missing `documentType` on existing requests/records still means PPTX; registry paths and presentation IDs are unchanged. New versions must match the linked document type and destination. Complete the native acceptance checks before releasing Word support.
 
 ```sh
 npm test
@@ -71,8 +85,25 @@ npm run manifest -- --url "$TASKPANE_URL" --output office/manifest.deployed.xml
 npx office-addin-manifest validate office/manifest.deployed.xml
 ```
 
-Set `TASKPANE_URL` before running these commands. Replace the previously sideloaded manifest with the hosted one and restart PowerPoint. Hosted login sessions and upload history are separate from local development; local history is not automatically migrated.
+Set `TASKPANE_URL` before running these commands. Replace the previously sideloaded manifest with the hosted one and restart Office. Hosted login sessions and upload history are separate from local development; local history is not automatically migrated.
 
 ## Using the Add-in
 
-Sign in, select your destination, and choose **Upload to Frame.io**. Save the presentation to retain its tracking ID. Once an upload is recorded, the add-in offers **Add a new version** and a link to the existing Frame.io asset. Keep the pane open until the upload finishes. Copies of a presentation inherit its tracking ID and version history.
+Sign in, select your destination, choose a valid `.pptx` or `.docx` filename, and choose **Upload to Frame.io**. Files must be between 1 byte and 1 GiB. Keep the pane open until the upload finishes. Once an upload is recorded, the add-in offers **Add a new version** and a link to the existing Frame.io asset; its destination stays fixed.
+
+Tracking uses `MSOFFICE_TO_FRAME_UUID`: a PowerPoint presentation tag or a Word custom document property. Save the document when prompted to retain its UUID after closing. The add-in does not force a save; supported unsaved documents can upload. Rename, Save As, and copies intentionally retain the same ID and version history. A malformed, removed, changed, or inaccessible ID stops uploads rather than substituting a browser/filename identity. There is no distributed coauthoring lock or independent-copy reset.
+
+Word uses an Office sign-in dialog, as PowerPoint does. Each host may have separate browser storage, so signing in to PowerPoint does not guarantee Word is signed in. No Word thumbnail/PDF conversion or Frame.io native DOCX review rendering is promised.
+
+Cancellation does not delete a file already created in Frame.io. Use **Check upload status** for uncertain completion, inspect the destination before acknowledging another file creation, and use history retry/refresh when lookup fails. Signed storage URLs and Adobe tokens must never be logged or shared.
+
+## Native Acceptance
+
+Run these checks on both Word Mac and Windows with disposable documents and an explicitly approved Frame.io test destination. Record Office versions/update channels and results. They remain pending until executed on native installations.
+
+1. Export saved and unsaved DOCX, including current edits, headers/footers, tables, images, fields, comments, and tracked changes. Include a large multi-slice file and a spaced/non-ASCII filename. Reopen the export in Word and check fidelity; ZIP signatures alone are insufficient.
+2. Create a UUID once, inspect it in the exported document, save/reopen, rename, and Save As/copy. Verify identity/history persists. Test malformed metadata, denied writes, read-only/protected files, and identity changes while the pane is open; do not bypass protection.
+3. Test Office-dialog login, cancel/close/failure, session restoration, logout/expiry, and the Mac dropdown click behavior. Verify account/project/folder browsing.
+4. Upload and download a DOCX; compare its contents. Upload versions two and three and verify one shared version stack, filename and fixed destination. Native DOCX preview is not an acceptance requirement.
+5. Test cancellation during export/transfer, offline/403/retry, pending confirmation, history refresh, moved/deleted assets, and registration failures. Verify cleanup and accurate warnings about retained remote files.
+6. Check narrow/wide panes, long names, no empty Word slide frame, and disabled unsupported hosts. Regress PowerPoint preview, OAuth, existing records without type, and first/second/third uploads against the new backend.

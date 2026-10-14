@@ -32,7 +32,7 @@ function makeFixture(frameFetch) {
   return { call, values, registryFiles, setNonce: value => { nonce = value }, advance: milliseconds => { time += milliseconds }, requests: () => requests }
 }
 
-test('upload routes require login, use the user token and store signed URLs encrypted', async () => {
+for (const documentType of [undefined, 'docx']) test(`${documentType || 'legacy PPTX'} upload routes require login, use the user token and store signed URLs encrypted`, async () => {
   let creates = 0
   const fixture = makeFixture(async (url, options) => {
     assert.equal(options.headers.Authorization, 'Bearer private-access-token')
@@ -48,7 +48,7 @@ test('upload routes require login, use the user token and store signed URLs encr
     }
     return new Response(JSON.stringify({ data }), { headers: { 'Content-Type': 'application/json' } })
   })
-  const params = { presentationId: 'aaaaaaaa-1234-1234-1234-123456789abc', uploadId: '12345678-1234-1234-1234-123456789abc', accountId: 'account', projectId: 'project', folderId: 'root', name: 'Deck.pptx', fileSize: 8 }
+  const params = { presentationId: 'aaaaaaaa-1234-1234-1234-123456789abc', ...(documentType ? { documentType } : {}), uploadId: '12345678-1234-1234-1234-123456789abc', accountId: 'account', projectId: 'project', folderId: 'root', name: documentType === 'docx' ? 'Report.docx' : 'Deck.pptx', fileSize: 8 }
   assert.equal((await fixture.call('upload-start', params)).statusCode, 401)
   const start = await fixture.call('start')
   const url = new URL(start.body.authorizationUrl)
@@ -65,6 +65,7 @@ test('upload routes require login, use the user token and store signed URLs encr
   const found = await fixture.call('presentation-lookup', { presentationId: params.presentationId })
   assert.equal(found.body.entry.fileId, 'file')
   assert.equal(found.body.entry.version, 1)
+  assert.equal(found.body.entry.documentType, documentType || 'pptx')
   assert.equal([...fixture.registryFiles.values()].join('').includes('private-signature'), false)
   assert.equal([...fixture.registryFiles.values()].join('').includes('private-access-token'), false)
   fixture.advance(25 * 60 * 60 * 1000)

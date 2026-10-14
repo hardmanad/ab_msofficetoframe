@@ -55,6 +55,25 @@ test('hosted manifest accepts a cache version without allowing arbitrary query p
   assert.throws(() => createManifest(url + '&redirect=elsewhere'))
 })
 
+test('authentication reports HTTP errors instead of native JSON parsing errors', async () => {
+  const publicConfig = require('../web-src/public-config.json')
+  const origin = 'https://27200-msofficetoframe-stage.adobeio-static.net'
+  const exports = {}
+  let response
+  vm.runInNewContext(authCode, {
+    exports, require: () => ({ default: publicConfig }), URL, AbortSignal,
+    location: { hostname: new URL(origin).hostname, origin, href: origin + '/index.html' },
+    localStorage: { getItem: () => 'ab'.repeat(32) }, sessionStorage: { removeItem: () => {} },
+    fetch: async () => response
+  })
+  response = { ok: false, status: 503, json: async () => { throw new SyntaxError('The string did not match the expected pattern.') } }
+  await assert.rejects(exports.oauthRequest('session'), { status: 503, message: 'Authentication service returned HTTP 503 instead of JSON.' })
+  response = new Response('<!DOCTYPE html>', { status: 200 })
+  await assert.rejects(exports.oauthRequest('session'), { status: 502, message: 'Authentication service returned an invalid response.' })
+  response = Response.json({ error: 'Session expired.' }, { status: 401 })
+  await assert.rejects(exports.oauthRequest('session'), { status: 401, message: 'Session expired.' })
+})
+
 test('app session persists across fresh panels and sign-out clears both stores', () => {
   const persistent = new Map()
   const first = authClient(persistent).appSession()
@@ -129,19 +148,152 @@ test('connection menu survives native null-target blur and activates the sign-in
   assert.equal(changes.at(-1), false)
 })
 
+test('Word App uses Office dialogs even without export and renders no slide preview', async () => {
+  const source = ts.createSourceFile('index.tsx', fs.readFileSync(require.resolve('../web-src/index.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const component = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'App')
+  const transformed = ts.transform(component, [context => node => ts.visitNode(node, function visit(child) {
+    return ts.isMetaProperty(child) ? ts.factory.createIdentifier('moduleMeta') : ts.visitEachChild(child, visit, context)
+  })])
+  const code = ts.transpileModule(ts.createPrinter().printNode(ts.EmitHint.Unspecified, transformed.transformed[0], source) + '\nmodule.exports = App;', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
+  transformed.dispose()
+  for (const available of [true, false]) {
+    const module = { exports: {} }
+    let stateIndex = 0
+    const effects = [], dialogs = [], changes = []
+    const adapter = { kind: 'word', noun: 'document', filename: () => 'Report.docx', ensureId: async () => 'aaaaaaaa-1234-1234-1234-123456789abc' }
+    const host = { kind: 'word', adapter, inOffice: true, available, reason: available ? '' : 'DOCX uploads require Word on Mac or Windows desktop.' }
+    const element = (type, props) => ({ type, props })
+    vm.runInNewContext(code, {
+      module, exports: module.exports, URL, moduleMeta: { url: 'https://www.localappbuilder.com:3000/index.html' }, AbortController,
+      require: () => ({ jsx: element, jsxs: element }),
+      useState: initial => { const index = stateIndex++; return [index === 0 ? host : index === 1 ? 'signed-out' : initial, value => changes.push(value)] },
+      useRef: () => ({ current: null }), useEffect: callback => effects.push(callback),
+      signIn: async inOffice => dialogs.push(inOffice), clearAppSession: () => {},
+      ConnectionMenu: 'ConnectionMenu', UploadPanel: 'UploadPanel', DestinationPicker: 'DestinationPicker', FileText: 'FileText', LoaderCircle: 'LoaderCircle', ImageOff: 'ImageOff'
+    })
+    const tree = module.exports()
+    const elements = value => !value || typeof value !== 'object' ? [] : Array.isArray(value) ? value.flatMap(elements) : [value, ...elements(value.props?.children)]
+    const nodes = elements(tree)
+    assert.equal(nodes.some(node => node.props?.className === 'slide-preview'), false)
+    assert.equal(nodes.some(node => node.type === 'ImageOff'), false)
+    assert.equal(nodes.find(node => node.type === 'UploadPanel').props.adapter, adapter)
+    assert.equal(nodes.find(node => node.type === 'UploadPanel').props.available, available)
+    assert.equal(nodes.find(node => node.type === 'header').props.children[1].props.children[1].props.children.join(''), 'Word / Frame.io')
+    effects[2]()
+    assert.equal(changes.at(-1).name, 'Report.docx')
+    assert.equal(changes.at(-1).loading, false)
+    await nodes.find(node => node.type === 'ConnectionMenu').props.connect()
+    assert.deepEqual(dialogs, [true])
+  }
+})
+
+test('disposable Word documents and Office lock files remain ignored', () => {
+  const patterns = fs.readFileSync(require.resolve('../.gitignore'), 'utf8').split(/\r?\n/)
+  assert.ok(patterns.includes('*.docx'))
+  assert.ok(patterns.includes('~$*'))
+})
+
+function saveReminderEffect(isSaved, initial = { id: 'document-id', created: true, checking: false, error: '' }) {
+  const source = ts.createSourceFile('index.tsx', fs.readFileSync(require.resolve('../web-src/index.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const app = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'App')
+  const effect = app.body.statements.filter(ts.isExpressionStatement).map(node => node.expression)
+    .find(node => ts.isCallExpression(node) && node.expression.getText(source) === 'useEffect' && node.arguments[0].getText(source).includes('checkSaved'))
+  assert.ok(effect)
+  const code = ts.transpileModule('const effect = ' + effect.arguments[0].getText(source) + '; module.exports = effect;', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const module = { exports: {} }, timers = new Map()
+  let identity = initial, updates = 0, nextTimer = 0
+  vm.runInNewContext(code, {
+    module, host: { adapter: { isSaved } }, identity: initial,
+    setIdentity: update => { identity = update(identity); updates++ },
+    window: { setTimeout: (callback, milliseconds) => { assert.equal(milliseconds, 2000); timers.set(++nextTimer, callback); return nextTimer }, clearTimeout: timer => timers.delete(timer) }
+  })
+  return { cleanup: module.exports(), timers, identity: () => identity, updates: () => updates,
+    replaceIdentity: next => { identity = next }, settle: () => new Promise(setImmediate),
+    tick: async () => { const [timer, callback] = timers.entries().next().value; timers.delete(timer); await callback() } }
+}
+
+test('Word save reminder clears after confirmed save and stops checking', async () => {
+  let checks = 0
+  const client = saveReminderEffect(async () => ++checks > 1)
+  await client.settle()
+  assert.equal(client.identity().created, true)
+  assert.equal(client.timers.size, 1)
+  await client.tick()
+  assert.equal(client.identity().created, false)
+  assert.equal(client.identity().id, 'document-id')
+  assert.equal(client.updates(), 1)
+  assert.equal(client.timers.size, 0)
+  client.cleanup()
+  assert.equal(checks, 2)
+})
+
+test('save reminder keeps failed or unknown saves visible and cleans up pending checks', async () => {
+  let checks = 0
+  const client = saveReminderEffect(async () => { if (++checks === 1) throw new Error('Save state unavailable'); return false })
+  await client.settle()
+  assert.equal(client.updates(), 0)
+  await client.tick()
+  assert.equal(client.identity().created, true)
+  assert.equal(client.timers.size, 1)
+  client.cleanup()
+  assert.equal(client.timers.size, 0)
+  for (const saved of [true, false]) {
+    let finish
+    const pending = saveReminderEffect(() => new Promise(resolve => { finish = resolve }))
+    assert.equal(pending.timers.size, 0)
+    pending.cleanup()
+    finish(saved)
+    await pending.settle()
+    assert.equal(pending.updates(), 0)
+    assert.equal(pending.timers.size, 0)
+  }
+})
+
+test('save monitoring does not affect PowerPoint, existing IDs or a replaced identity', async () => {
+  const powerpoint = saveReminderEffect(undefined)
+  assert.equal(powerpoint.cleanup, undefined)
+  assert.equal(powerpoint.timers.size, 0)
+  const existing = saveReminderEffect(() => { throw new Error('Existing UUID must not be monitored') }, { id: 'existing', created: false })
+  assert.equal(existing.cleanup, undefined)
+  let finish
+  const client = saveReminderEffect(() => new Promise(resolve => { finish = resolve }))
+  client.replaceIdentity({ id: 'replacement', created: true })
+  finish(true)
+  await client.settle()
+  assert.equal(client.identity().id, 'replacement')
+  assert.equal(client.identity().created, true)
+  client.cleanup()
+})
+
+test('local development upload allowlist accepts the additive document type field', () => {
+  const source = ts.createSourceFile('dev.cjs', fs.readFileSync(require.resolve('../scripts/dev.cjs'), 'utf8'), ts.ScriptTarget.Latest, true)
+  let fields
+  function visit(node) {
+    if (ts.isArrayLiteralExpression(node)) {
+      const values = node.elements.filter(ts.isStringLiteral).map(element => element.text)
+      if (values.includes('presentationId')) fields = values
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.ok(fields.includes('documentType'))
+  assert.equal(fields.includes('FRAMEIO_CLIENT_SECRET'), false)
+})
+
 test('frontend dependencies are bundled for a browser without environment inlining', () => {
   assert.equal(packageConfig.targets.default.context, 'browser')
   assert.equal(packageConfig.targets.default.includeNodeModules, true)
   assert.equal(packageConfig['@parcel/transformer-js'].inlineEnvironment, false)
 })
 
-test('manifest is PowerPoint-only, permits metadata writes and uses explicit HTTPS paths', () => {
+test('manifest supports only PowerPoint and Word, permits metadata writes and uses explicit HTTPS paths', () => {
   const xml = createManifest('https://localhost:3000/index.html')
   assert.equal(XMLValidator.validate(xml), true)
   const manifest = new XMLParser({ ignoreAttributes: false }).parse(xml).OfficeApp
   assert.equal(manifest.Permissions, 'ReadWriteDocument')
   assert.equal(manifest.DisplayName['@_DefaultValue'], 'Frame.io')
-  assert.equal(manifest.Hosts.Host['@_Name'], 'Presentation')
+  assert.deepEqual(manifest.Hosts.Host.map(host => host['@_Name']), ['Presentation', 'Document'])
+  assert.equal(manifest.Id, '4f391fa8-6ea8-4a32-91d2-3b298c24104e')
   assert.equal(manifest.DefaultSettings.SourceLocation['@_DefaultValue'], 'https://localhost:3000/index.html')
   assert.equal(manifest.IconUrl['@_DefaultValue'], 'https://localhost:3000/assets/icon-32.png?v=frameio')
 })
