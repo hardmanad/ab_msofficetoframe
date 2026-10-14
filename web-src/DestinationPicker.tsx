@@ -41,7 +41,11 @@ export function DestinationPicker({ onSessionExpired, onSelection, disabled = fa
     const controller = new AbortController()
     setAccountLoad({ loading: true, error: '' })
     loadChoices('accounts', {}, setAccounts, controller.signal).then(result => {
-      if (!controller.signal.aborted) { setAccounts(result.items); setAccountLoad(idle) }
+      if (!controller.signal.aborted) {
+        setAccounts(result.items)
+        if (result.items.length === 1) setAccountId(result.items[0].id)
+        setAccountLoad(idle)
+      }
     }).catch(error => { if (!controller.signal.aborted) setAccountLoad(failure(error)) })
     return () => controller.abort()
   }, [accountRetry])
