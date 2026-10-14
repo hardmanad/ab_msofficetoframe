@@ -13,13 +13,24 @@ function createRegistry(files) {
     return JSON.parse((await files.read(path)).toString('utf8'))
   }
   return {
-    latest: presentationId => read(name(presentationId)),
+    async latest(presentationId) {
+      const entry = await read(name(presentationId))
+      return entry?.state === 'reset' ? undefined : entry
+    },
     event: (presentationId, uploadId) => read(name(presentationId, uploadId)),
+    async reset(presentationId, uploadId, now = Date.now) {
+      const current = await read(name(presentationId))
+      if (!current || current.uploadId !== uploadId) return false
+      await files.write(name(presentationId), JSON.stringify({ state: 'reset', resetAt: new Date(now()).toISOString() }))
+      return true
+    },
     async record(presentationId, entry) {
+      const current = await read(name(presentationId))
+      if (entry.state === 'complete' && current?.resetAt && (typeof entry.createdAt !== 'string' || entry.createdAt < current.resetAt)) return false
+      if (current?.resetAt) entry = { ...entry, resetAt: current.resetAt }
       await files.write(name(presentationId, entry.uploadId), JSON.stringify(entry))
       if (entry.state === 'complete') {
-        const current = await read(name(presentationId))
-        if (!current || entry.version > current.version || (entry.version === current.version && entry.completedAt >= current.completedAt)) await files.write(name(presentationId), JSON.stringify(entry))
+        if (!current || current.state === 'reset' || entry.version > current.version || (entry.version === current.version && entry.completedAt >= current.completedAt)) await files.write(name(presentationId), JSON.stringify(entry))
       }
     }
   }
@@ -40,7 +51,16 @@ function viewUrl(value, RequestError) {
 async function verifyAsset(entry, request, RequestError) {
   const assetId = validId(entry.stackId || entry.fileId, RequestError)
   const kind = entry.stackId ? 'version_stacks' : 'files'
-  const asset = (await request(`/v4/accounts/${validId(entry.accountId, RequestError)}/${kind}/${assetId}`)).data
+  const base = `/v4/accounts/${validId(entry.accountId, RequestError)}`
+  let asset
+  try { asset = (await request(`${base}/${kind}/${assetId}`)).data }
+  catch (error) {
+    if (!(error instanceof RequestError) || error.status !== 404) throw error
+    const project = (await request(`${base}/projects/${validId(entry.projectId, RequestError)}`)).data
+    if (project?.id !== entry.projectId || typeof project.root_folder_id !== 'string' || !project.root_folder_id) throw new RequestError(403, 'The original project is unavailable. The existing mapping was preserved.')
+    error.relinkAllowed = true
+    throw error
+  }
   if (asset?.id !== assetId || asset.project_id !== entry.projectId || asset.parent_id !== entry.folderId) throw new RequestError(409, 'The tracked asset moved or changed in Frame.io. Its mapping must be reviewed before uploading another version.')
   return { ...entry, name: typeof asset.name === 'string' ? asset.name : entry.name, viewUrl: viewUrl(asset.view_url, RequestError) }
 }
@@ -51,7 +71,7 @@ async function finalizeUpload(record, registry, request, RequestError, now = Dat
   const priorEvent = await registry.event(record.presentationId, record.uploadId)
   if (priorEvent?.state === 'complete') {
     if ((priorEvent.documentType === undefined ? 'pptx' : priorEvent.documentType) !== documentType) throw new RequestError(409, 'The registered upload has a different document type.')
-    await registry.record(record.presentationId, priorEvent)
+    if (await registry.record(record.presentationId, priorEvent) === false) throw new RequestError(409, 'This upload belongs to a replaced document mapping. Refresh history.')
     return priorEvent
   }
   const current = await registry.latest(record.presentationId)
@@ -94,7 +114,7 @@ async function finalizeUpload(record, registry, request, RequestError, now = Dat
     state: 'complete', version: (previous?.version || 0) + 1,
     createdAt: record.createdAt, completedAt: new Date(now()).toISOString()
   }
-  await registry.record(record.presentationId, entry)
+  if (await registry.record(record.presentationId, entry) === false) throw new RequestError(409, 'This upload belongs to a replaced document mapping. Refresh history.')
   return entry
 }
 

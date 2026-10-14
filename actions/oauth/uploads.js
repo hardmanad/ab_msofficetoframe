@@ -38,11 +38,17 @@ async function uploadOperation({ params, identity, read, write, request, registr
     if (!existing.parts) fail(409, 'The upload start outcome is uncertain. Do not retry with a new ID until you check the destination for a duplicate.')
     return { fileId: existing.fileId, parts: existing.parts }
   }
-  const previous = await registry.latest(params.presentationId)
+  let previous = await registry.latest(params.presentationId)
+  let missing
   if (previous) {
     if ((previous.documentType === undefined ? 'pptx' : previous.documentType) !== documentType) fail(409, 'New versions must use the existing document type.')
-    await verifyAsset(previous, request, RequestError)
-    if (previous.accountId !== accountId || previous.projectId !== projectId || previous.folderId !== folderId) fail(409, 'New versions must use the existing Frame.io destination.')
+    try { await verifyAsset(previous, request, RequestError) }
+    catch (error) {
+      if (!(error instanceof RequestError) || error.status !== 404 || !error.relinkAllowed) throw error
+      missing = previous
+      previous = undefined
+    }
+    if (previous && (previous.accountId !== accountId || previous.projectId !== projectId || previous.folderId !== folderId)) fail(409, 'New versions must use the existing Frame.io destination.')
   }
   const project = (await request(`/v4/accounts/${accountId}/projects/${projectId}`)).data
   if (!project?.root_folder_id) fail(502, 'Frame.io returned an invalid project.')
@@ -50,6 +56,7 @@ async function uploadOperation({ params, identity, read, write, request, registr
     const folder = (await request(`/v4/accounts/${accountId}/folders/${folderId}`)).data
     if (folder?.project_id !== projectId) fail(403, 'The folder does not belong to this project.')
   }
+  if (missing && !await registry.reset(params.presentationId, missing.uploadId, now)) fail(409, 'The document mapping changed. Refresh history before uploading.')
   const event = { presentationId: params.presentationId, documentType, uploadId: params.uploadId, accountId, projectId, folderId, name, fileSize, createdAt: new Date(now()).toISOString() }
   const record = { ...event, previous, expiresAt: now() + uploadTTL * 1000 }
   await write(key, record, uploadTTL)

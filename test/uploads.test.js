@@ -3,7 +3,7 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const { uploadOperation, maxFileSize } = require('../actions/oauth/uploads')
-const { createRegistry } = require('../actions/oauth/registry')
+const { createRegistry, finalizeUpload } = require('../actions/oauth/registry')
 const { localState } = require('../scripts/local-state.cjs')
 const fs = require('node:fs/promises')
 const os = require('node:os')
@@ -105,6 +105,61 @@ test('provider failures remain in durable history without becoming the current a
   assert.equal((await uploadOperation(options)).failed, true)
   assert.equal((await options.registry.event(presentationId, uploadId)).state, 'failed')
   assert.equal(await options.registry.latest(presentationId), undefined)
+})
+
+for (const documentType of ['pptx', 'docx']) test(`a deleted ${documentType} asset can be replaced in a new destination with the same UUID`, async () => {
+  const { options, calls } = fixture({ documentType, name: documentType === 'docx' ? 'Report.docx' : 'Deck.pptx' })
+  const previous = { presentationId: options.params.presentationId, documentType, uploadId: 'bbbbbbbb-1234-1234-1234-123456789abc', accountId: 'old-account', projectId: 'old-project', folderId: 'old-folder', fileId: 'deleted', state: 'complete', version: 5, createdAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:01:00.000Z' }
+  await options.registry.record(previous.presentationId, previous)
+  const original = options.request
+  options.request = async (path, ...rest) => {
+    if (path.endsWith('/files/deleted')) throw new RequestError(404, 'Asset deleted')
+    if (path.endsWith('/projects/old-project')) return { data: { id: 'old-project', root_folder_id: 'old-folder' } }
+    return original(path, ...rest)
+  }
+  await uploadOperation(options)
+  assert.equal(await options.registry.latest(previous.presentationId), undefined)
+  await options.registry.record(previous.presentationId, previous)
+  assert.equal(await options.registry.latest(previous.presentationId), undefined)
+  options.params = { operation: 'upload-status', uploadId: options.params.uploadId }
+  const result = await uploadOperation(options)
+  assert.equal(result.entry.presentationId, previous.presentationId)
+  assert.equal(result.entry.fileId, 'file')
+  assert.equal(result.entry.accountId, 'account')
+  assert.equal(result.entry.version, 1)
+  assert.equal(result.entry.stackId, undefined)
+  assert.equal(calls.some(call => call.path.includes('version_stacks') || call.init?.method === 'PATCH'), false)
+  await options.registry.record(previous.presentationId, previous)
+  assert.equal((await options.registry.latest(previous.presentationId)).fileId, 'file')
+  await assert.rejects(finalizeUpload(previous, options.registry, options.request, RequestError), { status: 409 })
+  assert.equal((await options.registry.latest(previous.presentationId)).fileId, 'file')
+  assert.equal((await options.registry.event(previous.presentationId, previous.uploadId)).fileId, 'deleted')
+  assert.equal((await uploadOperation(options)).entry.fileId, 'file')
+})
+
+test('replacement preserves the mapping when the asset, original project or new destination cannot be verified', async () => {
+  for (const failure of ['asset-denied', 'project-denied', 'new-destination-denied', 'asset-live', 'mapping-changed']) {
+    const { options, calls } = fixture()
+    const previous = { presentationId: options.params.presentationId, uploadId: 'bbbbbbbb-1234-1234-1234-123456789abc', accountId: 'old-account', projectId: 'old-project', folderId: 'old-folder', fileId: 'deleted', state: 'complete', version: 1, createdAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:01:00.000Z' }
+    await options.registry.record(previous.presentationId, previous)
+    const original = options.request
+    options.request = async (path, ...rest) => {
+      if (path.endsWith('/files/deleted')) {
+        if (failure === 'asset-live') return { data: { id: 'deleted', project_id: 'old-project', parent_id: 'old-folder', view_url: 'https://next.frame.io/file/deleted' } }
+        throw new RequestError(failure === 'asset-denied' ? 403 : 404, 'Asset unavailable')
+      }
+      if (path.endsWith('/projects/old-project')) {
+        if (failure === 'project-denied') throw new RequestError(403, 'Project denied')
+        return { data: { id: 'old-project', root_folder_id: 'old-folder' } }
+      }
+      if (failure === 'new-destination-denied') throw new RequestError(403, 'New destination denied')
+      return original(path, ...rest)
+    }
+    if (failure === 'mapping-changed') options.registry.reset = async () => false
+    await assert.rejects(uploadOperation(options), { status: ['asset-live', 'mapping-changed'].includes(failure) ? 409 : 403 })
+    assert.equal((await options.registry.latest(previous.presentationId)).fileId, 'deleted')
+    assert.equal(calls.some(call => call.init?.method === 'POST'), false)
+  }
 })
 
 test('upload does not repeat an uncertain create request or return arbitrary upload URLs', async () => {

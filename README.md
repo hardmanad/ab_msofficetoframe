@@ -93,6 +93,8 @@ Sign in, select your destination, choose a valid `.pptx` or `.docx` filename, an
 
 Tracking uses `MSOFFICE_TO_FRAME_UUID`: a PowerPoint presentation tag or a Word custom document property. Save the document when prompted to retain its UUID after closing. The add-in does not force a save; supported unsaved documents can upload. Rename, Save As, and copies intentionally retain the same ID and version history. A malformed, removed, changed, or inaccessible ID stops uploads rather than substituting a browser/filename identity. There is no distributed coauthoring lock or independent-copy reset.
 
+If the linked Frame.io file or version stack has been deleted, the history warning remains visible. When the original project is still accessible, select an account, project, and folder to enable a replacement upload. The backend rechecks the missing asset and selected destination, clears the stale active mapping, and links the existing document UUID to the replacement at version 1. Private audit records are retained, but old confirmation retries cannot restore the retired mapping. Permission failures, moved assets, and unverified history do not enable this recovery.
+
 Word uses an Office sign-in dialog, as PowerPoint does. Each host may have separate browser storage, so signing in to PowerPoint does not guarantee Word is signed in. No Word thumbnail/PDF conversion or Frame.io native DOCX review rendering is promised.
 
 Cancellation does not delete a file already created in Frame.io. Use **Check upload status** for uncertain completion, inspect the destination before acknowledging another file creation, and use history retry/refresh when lookup fails. Signed storage URLs and Adobe tokens must never be logged or shared.

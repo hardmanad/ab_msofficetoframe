@@ -79,6 +79,26 @@ test('registry lookup verifies current Frame.io access and refuses moved assets 
   await assert.rejects(verifyAsset(entry, async () => ({ data: { id: 'file', project_id: 'project', parent_id: 'folder', view_url: 'https://attacker.example/file' } }), RequestError), { status: 502 })
 })
 
+test('missing files and stacks permit relinking only while the original project is accessible', async () => {
+  for (const stackId of [undefined, 'stack']) {
+    const entry = { accountId: 'account', projectId: 'project', folderId: 'folder', fileId: 'file', stackId }
+    const requests = []
+    const request = async url => {
+      requests.push(url)
+      if (url.endsWith('/projects/project')) return { data: { id: 'project', root_folder_id: 'folder' } }
+      throw new RequestError(404, 'This Frame.io selection is no longer available.')
+    }
+    await assert.rejects(verifyAsset(entry, request, RequestError), { status: 404, relinkAllowed: true })
+    assert.equal(requests.length, 2)
+    for (const status of [401, 403, 404, 502]) {
+      await assert.rejects(verifyAsset(entry, async url => {
+        if (url.endsWith('/projects/project')) throw new RequestError(status, 'Project unavailable')
+        throw new RequestError(404, 'Asset unavailable')
+      }, RequestError), error => error.status === status && !error.relinkAllowed)
+    }
+  }
+})
+
 for (const documentType of [undefined, 'docx']) test(`a lost ${documentType || 'legacy PPTX'} version-stack response is recovered without creating a duplicate stack`, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'frameio-stack-recovery-'))
   try {

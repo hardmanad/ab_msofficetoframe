@@ -324,10 +324,16 @@ function uploadPane(options = {}) {
       })
     }
   }
-  const auth = { ApiError: class extends Error {}, oauthRequest: async (operation, params) => {
+  const auth = { ApiError: class extends Error { constructor(message, status, relinkAllowed = false) { super(message); this.status = status; this.relinkAllowed = relinkAllowed } }, oauthRequest: async (operation, params) => {
     calls.push({ operation, params })
-    if (operation === 'presentation-lookup') return { entry: completed || options.historyType ? registered : null }
-    if (operation === 'upload-start') return { fileId: 'file', parts: [{ size: 8, url: parts[0].url }] }
+    if (operation === 'presentation-lookup') {
+      if (options.historyStatus && !completed) throw new auth.ApiError('This Frame.io selection is no longer available.', options.historyStatus, options.relinkAllowed === true)
+      return { entry: completed || options.historyType ? registered : null }
+    }
+    if (operation === 'upload-start') {
+      Object.assign(registered, { accountId: params.accountId, projectId: params.projectId, folderId: params.folderId })
+      return { fileId: 'file', parts: [{ size: 8, url: parts[0].url }] }
+    }
     completed = true
     return { complete: true, failed: false, entry: registered }
   } }
@@ -407,4 +413,38 @@ test('PowerPoint pane still submits PPTX through the shared upload flow', async 
   assert.equal(pane.calls.find(call => call.operation === 'upload-start').params.documentType, 'pptx')
   assert.equal(pane.calls.find(call => call.operation === 'put').mimeType, exportsObject.pptxType)
   assert.equal(pane.calls.at(-1).operation, 'close')
+})
+
+for (const host of ['Word', 'PowerPoint']) test(`${host} permits a replacement after selecting a destination for a confirmed missing asset`, async () => {
+  const pane = uploadPane({ host, filename: host === 'Word' ? 'Report.docx' : 'Deck.pptx', historyStatus: 404, relinkAllowed: true })
+  pane.props.destination = null
+  pane.render()
+  await pane.settle()
+  const upload = () => pane.find(node => node.type === 'button' && node.props.className === 'upload')
+  assert.equal(upload().props.disabled, true)
+  assert.ok(pane.find(node => node.props?.role === 'alert'))
+  pane.props.destination = { accountId: 'new-account', projectId: 'new-project', folderId: 'new-folder' }
+  pane.render()
+  assert.equal(upload().props.disabled, false)
+  assert.ok(pane.find(node => node.props?.role === 'alert'))
+  await upload().props.onClick()
+  pane.render()
+  const start = pane.calls.find(call => call.operation === 'upload-start').params
+  assert.equal(start.presentationId, pane.props.presentationId)
+  assert.equal(start.accountId, 'new-account')
+  assert.equal(start.projectId, 'new-project')
+  assert.equal(start.folderId, 'new-folder')
+  assert.equal(pane.find(node => node.props?.role === 'alert'), undefined)
+})
+
+test('a selected destination does not bypass unknown, inaccessible or moved document history', async () => {
+  for (const [historyStatus, relinkAllowed] of [[404, false], [403, false], [409, false], [502, false], [403, true]]) {
+    const pane = uploadPane({ host: 'PowerPoint', filename: 'Deck.pptx', historyStatus, relinkAllowed })
+    pane.render()
+    await pane.settle()
+    const upload = pane.find(node => node.type === 'button' && node.props.className === 'upload')
+    assert.equal(upload.props.disabled, true)
+    await upload.props.onClick()
+    assert.equal(pane.calls.some(call => call.operation === 'export' || call.operation === 'upload-start'), false)
+  }
 })

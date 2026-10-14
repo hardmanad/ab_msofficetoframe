@@ -10,7 +10,7 @@ export type Destination = { accountId: string; projectId: string; folderId: stri
 export type RegistryEntry = Destination & { presentationId: string; documentType?: 'pptx' | 'docx'; uploadId: string; name: string; fileSize: number; fileId: string; stackId?: string; viewUrl: string; state: 'complete'; version: number; createdAt: string; completedAt: string }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message) }
+  constructor(message: string, public status: number, public relinkAllowed = false) { super(message) }
 }
 
 export function appSession() {
@@ -56,7 +56,7 @@ export async function oauthRequest(operation: 'start' | 'callback' | 'session' |
   const body = await response.json().catch(() => {
     throw new ApiError(response.ok ? 'Authentication service returned an invalid response.' : `Authentication service returned HTTP ${response.status} instead of JSON.`, response.ok ? 502 : response.status)
   })
-  if (!response.ok) throw new ApiError(typeof body.error === 'string' ? body.error : 'Authentication request failed.', response.status)
+  if (!response.ok) throw new ApiError(typeof body.error === 'string' ? body.error : 'Authentication request failed.', response.status, operation === 'presentation-lookup' && response.status === 404 && body.relinkAllowed === true)
   return body as { authenticated?: boolean; authorizationUrl?: string; revoked?: boolean; fileId?: string; parts?: { url: string; size: number }[]; complete?: boolean; failed?: boolean; entry?: RegistryEntry | null } & Partial<ChoicePage>
 }
 

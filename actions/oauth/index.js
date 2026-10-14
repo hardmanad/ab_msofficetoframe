@@ -241,7 +241,7 @@ function createHandler({ getStore = () => stateLib.init(), getRegistry = async (
       }
       return response(200, { authenticated: true })
     } catch (error) {
-      if (error instanceof RequestError) return response(error.status, { error: error.message })
+      if (error instanceof RequestError) return response(error.status, { error: error.message, ...(error.relinkAllowed ? { relinkAllowed: true } : {}) })
       if (params?.operation === 'presentation-lookup') return response(502, { error: 'Presentation history is unavailable. Retry before uploading.' })
       if (['upload-start', 'upload-status'].includes(params?.operation)) return response(502, { error: 'Frame.io upload or version registration could not be confirmed. Check the destination before starting again.' })
       return response(502, { error: ['accounts', 'projects', 'folders'].includes(params?.operation)

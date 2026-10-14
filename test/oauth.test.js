@@ -79,6 +79,32 @@ for (const documentType of [undefined, 'docx']) test(`${documentType || 'legacy 
   assert.equal(reopened.body.entry.fileId, 'file')
 })
 
+test('history lookup keeps the missing-asset warning and authorizes recovery only with original project access', async () => {
+  let projectStatus = 200
+  const fixture = makeFixture(async url => {
+    if (url.pathname.endsWith('/projects/project')) return Response.json({ data: { id: 'project', root_folder_id: 'root' } }, { status: projectStatus })
+    return Response.json({ error: 'Missing' }, { status: 404 })
+  })
+  const presentationId = 'aaaaaaaa-1234-1234-1234-123456789abc'
+  const entry = { presentationId, uploadId: '12345678-1234-1234-1234-123456789abc', accountId: 'account', projectId: 'project', folderId: 'root', fileId: 'deleted', state: 'complete', version: 1 }
+  const current = `presentation-uploads/${presentationId}/current.json`
+  fixture.registryFiles.set(current, JSON.stringify(entry))
+  const start = await fixture.call('start')
+  const authorization = new URL(start.body.authorizationUrl)
+  fixture.setNonce(authorization.searchParams.get('nonce'))
+  await fixture.call('callback', { state: authorization.searchParams.get('state'), code: 'code' })
+  const missing = await fixture.call('presentation-lookup', { presentationId })
+  assert.equal(missing.statusCode, 404)
+  assert.equal(missing.body.error, 'This Frame.io selection is no longer available.')
+  assert.equal(missing.body.relinkAllowed, true)
+  assert.equal(JSON.parse(fixture.registryFiles.get(current)).fileId, 'deleted')
+  projectStatus = 403
+  const denied = await fixture.call('presentation-lookup', { presentationId })
+  assert.equal(denied.statusCode, 403)
+  assert.equal(denied.body.relinkAllowed, undefined)
+  assert.equal(JSON.parse(fixture.registryFiles.get(current)).fileId, 'deleted')
+})
+
 test('OAuth uses PKCE, encrypted storage and session-scoped output without returning tokens', async () => {
   const fixture = makeFixture()
   const start = await fixture.call('start')

@@ -72,6 +72,12 @@ test('authentication reports HTTP errors instead of native JSON parsing errors',
   await assert.rejects(exports.oauthRequest('session'), { status: 502, message: 'Authentication service returned an invalid response.' })
   response = Response.json({ error: 'Session expired.' }, { status: 401 })
   await assert.rejects(exports.oauthRequest('session'), { status: 401, message: 'Session expired.' })
+  response = Response.json({ error: 'Asset missing.', relinkAllowed: true }, { status: 404 })
+  await assert.rejects(exports.oauthRequest('presentation-lookup'), { status: 404, relinkAllowed: true })
+  response = Response.json({ error: 'Asset missing.' }, { status: 404 })
+  await assert.rejects(exports.oauthRequest('presentation-lookup'), { status: 404, relinkAllowed: false })
+  response = Response.json({ error: 'Denied.', relinkAllowed: true }, { status: 403 })
+  await assert.rejects(exports.oauthRequest('presentation-lookup'), { status: 403, relinkAllowed: false })
 })
 
 test('app session persists across fresh panels and sign-out clears both stores', () => {

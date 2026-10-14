@@ -26,7 +26,7 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
   const [state, setState] = useState<UploadState>(idle)
   const [allowNew, setAllowNew] = useState(false)
   const [entry, setEntry] = useState<RegistryEntry | null>(null)
-  const [history, setHistory] = useState({ loading: false, checked: false, error: '' })
+  const [history, setHistory] = useState({ loading: false, checked: false, error: '', relinkAllowed: false })
   const [historyRetry, setHistoryRetry] = useState(0)
   const expired = useRef(onSessionExpired)
   useEffect(() => { expired.current = onSessionExpired }, [onSessionExpired])
@@ -38,23 +38,24 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
   const busy = busyPhases.includes(state.phase)
   const mustConfirmNew = uncertainStart.current || (remoteCreated.current && state.phase !== 'complete')
   const validName = !!adapter && validUploadName(name, adapter.documentType)
+  const historyReady = history.checked || (history.relinkAllowed && !!destination)
   useEffect(() => () => { abort.current?.abort() }, [])
   useEffect(() => {
     setEntry(null)
     onAssetChange(null)
-    if (!signedIn || !presentationId || !adapter) { setHistory({ loading: false, checked: false, error: '' }); return }
+    if (!signedIn || !presentationId || !adapter) { setHistory({ loading: false, checked: false, error: '', relinkAllowed: false }); return }
     const controller = new AbortController()
-    setHistory({ loading: true, checked: false, error: '' })
+    setHistory({ loading: true, checked: false, error: '', relinkAllowed: false })
     oauthRequest('presentation-lookup', { presentationId }, controller.signal).then(result => {
       if (controller.signal.aborted) return
       const found = registryEntry(result.entry, presentationId, adapter.documentType)
       setEntry(found)
       onAssetChange(found)
-      setHistory({ loading: false, checked: true, error: '' })
+      setHistory({ loading: false, checked: true, error: '', relinkAllowed: false })
     }).catch(error => {
       if (controller.signal.aborted) return
       if (error instanceof ApiError && error.status === 401) expired.current()
-      setHistory({ loading: false, checked: false, error: error instanceof Error ? error.message : 'Document history is unavailable.' })
+      setHistory({ loading: false, checked: false, error: error instanceof Error ? error.message : 'Document history is unavailable.', relinkAllowed: error instanceof ApiError && error.status === 404 && error.relinkAllowed })
     })
     return () => controller.abort()
   }, [presentationId, signedIn, adapter, historyRetry, onAssetChange])
@@ -70,7 +71,7 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
           if (!found) throw new Error('Upload finished but registration is incomplete.')
           setEntry(found)
           onAssetChange(found)
-          setHistory({ loading: false, checked: true, error: '' })
+          setHistory({ loading: false, checked: true, error: '', relinkAllowed: false })
           setState(value => ({ ...value, phase: 'complete', message: '' }))
           return
         }
@@ -85,7 +86,7 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
 
   async function run(checkOnly = false) {
     const target = entry ? { accountId: entry.accountId, projectId: entry.projectId, folderId: entry.folderId } : destination
-    if (abort.current || !adapter || (!checkOnly && (!target || !available || !signedIn || !validName || !presentationId || !history.checked))) return
+    if (abort.current || !adapter || (!checkOnly && (!target || !available || !signedIn || !validName || !presentationId || !historyReady))) return
     if (!checkOnly && mustConfirmNew && !allowNew) return
     const controller = new AbortController()
     abort.current = controller
@@ -137,7 +138,7 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
     }
   }
 
-  const reason = !available ? unavailableReason || 'Word or PowerPoint document access required' : !signedIn ? 'Sign-in required' : !presentationId ? 'Document tracking ID required' : history.loading ? 'Checking document history' : !history.checked ? 'Document history unavailable' : !entry && !destination ? 'Destination required' : !validName ? `Valid .${adapter?.documentType} filename required` : ''
+  const reason = !available ? unavailableReason || 'Word or PowerPoint document access required' : !signedIn ? 'Sign-in required' : !presentationId ? 'Document tracking ID required' : history.loading ? 'Checking document history' : !historyReady ? 'Document history unavailable' : !entry && !destination ? 'Destination required' : !validName ? `Valid .${adapter?.documentType} filename required` : ''
   return <div className="upload-panel">
     {signedIn && presentationId && (entry || history.error) && <div className="asset-controls">
       {entry && <a className="account-button asset-link" href={entry.viewUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} aria-hidden="true" />Open in Frame.io</a>}
