@@ -67,7 +67,7 @@ Stage was deployed on 2026-10-13. Hosted encrypted records use Adobe Runtime Sta
 
 [.certs/localappbuilder.key](.certs/localappbuilder.key) is the server's TLS private key. It protects HTTPS transport, not OAuth token storage. Keep it private and do not transfer it merely to establish browser trust.
 
-The corresponding [public certificate](.certs/localappbuilder.crt) is what is imported and trusted on the Mac. It covers `www.localappbuilder.com`, `localhost`, and `127.0.0.1`. The generated certificate is self-signed with a 30-day validity; regeneration requires trusting the new certificate on the host.
+The corresponding [public certificate](.certs/localappbuilder.crt) is what is imported and trusted on the Mac. New certificates cover `localhost` and `127.0.0.1`; existing trusted certificates covering `localhost` can be reused. The legacy filenames do not imply hostname aliases. Local development uses only `https://localhost:3000` inside the container and on the host. The generated certificate is self-signed with a 30-day validity; regeneration requires trusting the new certificate on the host.
 
 The hosts-file entry only controls hostname resolution. It does not establish certificate trust or ownership of the public domain. Use an owned domain and appropriate certificates for production.
 

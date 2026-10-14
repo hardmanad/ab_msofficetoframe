@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Provider } from '@react-spectrum/s2/Provider'
+import { style } from '@react-spectrum/s2/style' with { type: 'macro' }
 import { ChevronDown, CircleCheck, CircleX, FileText, ImageOff, LoaderCircle, LogIn, LogOut, X } from 'lucide-react'
 import { clearAppSession, Destination, RegistryEntry, oauthRequest, signIn } from './auth'
 import { DestinationPicker } from './DestinationPicker'
@@ -181,4 +183,30 @@ function App() {
   </main>
 }
 
-createRoot(document.getElementById('root')!).render(<App />)
+createRoot(document.getElementById('root')!).render(<Provider colorScheme="light" background="base" styles={style({
+  fontFamily: 'sans',
+  '--ink': { type: 'color', value: 'body' },
+  '--muted': { type: 'color', value: 'detail' },
+  '--surface': { type: 'backgroundColor', value: 'base' },
+  '--surface-raised': { type: 'backgroundColor', value: 'layer-1' },
+  '--surface-muted': { type: 'backgroundColor', value: 'gray-100' },
+  '--line': { type: 'borderColor', value: 'gray-200' },
+  '--control-border': { type: 'borderColor', value: 'gray-500' },
+  '--accent': { type: 'color', value: 'accent' },
+  '--focus': { type: 'outlineColor', value: 'focus-ring' },
+  '--positive': { type: 'color', value: 'positive-1000' },
+  '--positive-background': { type: 'backgroundColor', value: 'positive-subtle' },
+  '--negative': { type: 'color', value: 'negative' },
+  '--notice': { type: 'color', value: 'notice-1200' },
+  '--notice-background': { type: 'backgroundColor', value: 'notice-subtle' },
+  '--notice-border': { type: 'borderColor', value: 'notice-700' },
+  '--disabled-ink': { type: 'color', value: 'disabled' },
+  '--disabled-background': { type: 'backgroundColor', value: 'disabled' },
+  '--primary-background': { type: 'backgroundColor', value: 'neutral' },
+  '--primary-ink': { type: 'color', value: 'white' },
+  '--control-radius': { type: 'borderRadius', value: 'default' },
+  '--line-ui': { type: 'lineHeight', value: 'ui' },
+  '--line-body': { type: 'lineHeight', value: 'body' },
+  '--line-heading': { type: 'lineHeight', value: 'heading' },
+  '--popover-shadow': { type: 'boxShadow', value: 'elevated' }
+})}><App /></Provider>)

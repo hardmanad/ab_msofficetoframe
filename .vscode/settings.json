@@ -1,4 +1,11 @@
 {
+    "remote.portsAttributes": {
+        "3000": {
+            "label": "Office task pane (HTTPS)",
+            "protocol": "https",
+            "requireLocalPort": true
+        }
+    },
     "chat.tools.terminal.autoApprove": {
         "command": true
     }

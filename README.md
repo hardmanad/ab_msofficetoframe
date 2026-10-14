@@ -46,14 +46,16 @@ Never put credentials in frontend files or commit Console exports, private keys,
 
 ## Run Locally
 
-Register `https://www.localappbuilder.com:3000/oauth-callback.html` in your OAuth credentials and use it as the local `FRAMEIO_REDIRECT_URI`. Configure `www.localappbuilder.com` to resolve to your development server; for a container, use the address reachable from the Office host.
+Use `https://localhost:3000` both inside the container and on its host OS. Port 3000 is dedicated to this container: publish or forward container port 3000 to host port 3000, never 3002. No custom hostname aliases, DNS mappings, or hosts-file entries are needed.
+
+OAuth currently runs on hosted Stage, whose origin and callback remain unchanged. Starting the local development server does not require switching OAuth to localhost. Only if explicitly testing local OAuth, register `https://localhost:3000/oauth-callback.html` in your OAuth credentials and set the local `FRAMEIO_REDIRECT_URI` to it. Local sign-in requires that opt-in configuration; a Stage callback does not authenticate the localhost panel.
 
 ```sh
 npm run certs
 npm run dev
 ```
 
-Trust the generated public certificate on the computer running Office. Do not share the TLS private key. Open `https://www.localappbuilder.com:3000/index.html` to check that the app loads without certificate errors.
+Trust the generated public certificate on the computer running Office. Do not share the TLS private key. Open `https://localhost:3000/index.html` to check that the app loads without certificate errors. Existing certificate filenames are retained; an already trusted certificate covering `localhost` need not be regenerated.
 
 Generate and validate the local Office manifest, then sideload it using your platform's Office add-in procedure:
 

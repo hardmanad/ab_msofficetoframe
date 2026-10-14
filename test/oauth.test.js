@@ -14,7 +14,7 @@ function makeFixture(frameFetch) {
   let nonce
   const config = {
     FRAMEIO_CLIENT_ID: 'test-client', FRAMEIO_CLIENT_SECRET: 'test-client-secret',
-    FRAMEIO_REDIRECT_URI: 'https://www.localappbuilder.com:3000/oauth-callback.html',
+    FRAMEIO_REDIRECT_URI: 'https://localhost:3000/oauth-callback.html',
     FRAMEIO_SCOPES: 'openid email profile offline_access additional_info.roles', FRAMEIO_TOKEN_KEY: 'ab'.repeat(32)
   }
   const store = { get: async key => values.has(key) ? { value: values.get(key) } : undefined, put: async (key, value) => values.set(key, value), delete: async key => values.delete(key) }
@@ -28,7 +28,7 @@ function makeFixture(frameFetch) {
     const idToken = encode({ alg: 'RS256' }) + '.' + encode({ iss: 'https://ims-na1.adobelogin.com', aud: config.FRAMEIO_CLIENT_ID, sub: 'test-user', nonce, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 }) + '.dGVzdA'
     return new Response(JSON.stringify({ access_token: 'private-access-token', refresh_token: 'private-refresh-token', expires_in: 3600, token_type: 'bearer', ...(body.get('grant_type') === 'authorization_code' ? { id_token: idToken } : {}) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   } })
-  const call = (operation, extra = {}) => handler({ ...config, __ow_method: 'post', __ow_headers: { origin: 'https://www.localappbuilder.com:3000', authorization: 'Bearer ' + 'cd'.repeat(32) }, operation, ...extra })
+  const call = (operation, extra = {}) => handler({ ...config, __ow_method: 'post', __ow_headers: { origin: 'https://localhost:3000', authorization: 'Bearer ' + 'cd'.repeat(32) }, operation, ...extra })
   return { call, values, registryFiles, setNonce: value => { nonce = value }, advance: milliseconds => { time += milliseconds }, requests: () => requests }
 }
 
@@ -70,7 +70,7 @@ for (const documentType of [undefined, 'docx']) test(`${documentType || 'legacy 
   assert.equal([...fixture.registryFiles.values()].join('').includes('private-access-token'), false)
   fixture.advance(25 * 60 * 60 * 1000)
   assert.equal((await fixture.call('presentation-lookup', { presentationId: params.presentationId })).statusCode, 401)
-  const freshHeaders = { origin: 'https://www.localappbuilder.com:3000', authorization: 'Bearer ' + 'ef'.repeat(32) }
+  const freshHeaders = { origin: 'https://localhost:3000', authorization: 'Bearer ' + 'ef'.repeat(32) }
   const freshStart = await fixture.call('start', { __ow_headers: freshHeaders })
   const freshUrl = new URL(freshStart.body.authorizationUrl)
   fixture.setNonce(freshUrl.searchParams.get('nonce'))
@@ -129,7 +129,7 @@ test('OAuth uses PKCE, encrypted storage and session-scoped output without retur
 test('OAuth rejects wrong origins, missing session keys, invalid state and methods', async () => {
   const fixture = makeFixture()
   assert.equal((await fixture.call('start', { __ow_headers: { origin: 'https://attacker.invalid' } })).statusCode, 403)
-  assert.equal((await fixture.call('start', { __ow_headers: { origin: 'https://www.localappbuilder.com:3000' } })).statusCode, 401)
+  assert.equal((await fixture.call('start', { __ow_headers: { origin: 'https://localhost:3000' } })).statusCode, 401)
   assert.equal((await fixture.call('start', { __ow_method: 'get' })).statusCode, 405)
   assert.equal((await fixture.call('proxy')).statusCode, 400)
   assert.equal((await fixture.call('callback', { state: 'unknown' })).statusCode, 400)
@@ -155,7 +155,7 @@ test('a different app session cannot read another user login', async () => {
   const url = new URL(start.body.authorizationUrl)
   fixture.setNonce(url.searchParams.get('nonce'))
   await fixture.call('callback', { state: url.searchParams.get('state'), code: 'provider-code' })
-  const result = await fixture.call('session', { __ow_headers: { origin: 'https://www.localappbuilder.com:3000', authorization: 'Bearer ' + 'ef'.repeat(32) } })
+  const result = await fixture.call('session', { __ow_headers: { origin: 'https://localhost:3000', authorization: 'Bearer ' + 'ef'.repeat(32) } })
   assert.deepEqual(result.body, { authenticated: false })
 })
 

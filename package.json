@@ -27,7 +27,7 @@
     "dev": "node scripts/dev.cjs",
     "certs": "node scripts/certs.cjs",
     "oauth:configure": "node scripts/configure-oauth.cjs",
-    "manifest:local": "node scripts/manifest.cjs --url https://www.localappbuilder.com:3000/index.html --output office/manifest.local.xml",
+    "manifest:local": "node scripts/manifest.cjs --url https://localhost:3000/index.html --output office/manifest.local.xml",
     "manifest": "node scripts/manifest.cjs",
     "validate:manifest": "office-addin-manifest validate office/manifest.local.xml",
     "assets": "node scripts/assets.cjs"
@@ -35,6 +35,7 @@
   "dependencies": {
     "@adobe/aio-lib-files": "^4.1.4",
     "@adobe/aio-lib-state": "^5.4.0",
+    "@react-spectrum/s2": "^1.8.1",
     "dotenv": "^18.0.0",
     "lucide-react": "^0.468.0",
     "oauth4webapi": "^3.8.8",
@@ -56,5 +57,17 @@
   },
   "@parcel/transformer-js": {
     "inlineEnvironment": false
+  },
+  "@parcel/resolver-default": {
+    "packageExports": true
+  },
+  "@parcel/bundler-default": {
+    "manualSharedBundles": [
+      {
+        "name": "s2-styles",
+        "types": ["css"],
+        "assets": ["**/@react-spectrum/s2/**", "web-src/**/*.{js,jsx,ts,tsx}"]
+      }
+    ]
   }
 }

@@ -42,7 +42,7 @@ export function clearAppSession() {
 }
 
 export async function oauthRequest(operation: 'start' | 'callback' | 'session' | 'logout' | BrowsingOperation | 'upload-start' | 'upload-status' | 'presentation-lookup', data: Record<string, string | number> = {}, signal?: AbortSignal) {
-  const local = ['localhost', '127.0.0.1', 'www.localappbuilder.com'].includes(location.hostname)
+  const local = location.origin === 'https://localhost:3000'
   const url = new URL(local ? '/api/oauth' : publicConfig.oauthUrl, location.href)
   const allowed = local ? url.origin === location.origin && url.pathname === '/api/oauth'
     : url.origin === location.origin && url.origin === 'https://27200-msofficetoframe-stage.adobeio-static.net' && url.pathname === '/api/v1/web/msofficetoframe/oauth'

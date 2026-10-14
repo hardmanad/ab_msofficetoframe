@@ -8,12 +8,12 @@ const directory = path.resolve('.certs')
 const key = path.join(directory, 'localappbuilder.key')
 const cert = path.join(directory, 'localappbuilder.crt')
 if (fs.existsSync(key) || fs.existsSync(cert)) {
-  console.error('Custom-domain certificate files already exist. Preserve them or remove them explicitly before regeneration.')
+  console.error('Local certificate files already exist. Preserve them or remove them explicitly before regeneration.')
   process.exit(1)
 }
 fs.mkdirSync(directory, { recursive: true })
 const result = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
-  '-days', '30', '-subj', '/CN=www.localappbuilder.com', '-addext', 'subjectAltName=DNS:www.localappbuilder.com,DNS:localhost,IP:127.0.0.1',
+  '-days', '30', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
   '-addext', 'basicConstraints=critical,CA:FALSE', '-addext', 'extendedKeyUsage=serverAuth'], { stdio: 'ignore' })
 if (result.error || result.status !== 0) {
   console.error('Certificate generation failed. Install OpenSSL or provide your own hostname-valid cert/key.')

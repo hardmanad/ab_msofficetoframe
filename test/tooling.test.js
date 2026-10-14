@@ -10,9 +10,27 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const ts = require('typescript')
 const { webcrypto } = require('node:crypto')
+const { spawnSync } = require('node:child_process')
 
 const authCode = ts.transpileModule(fs.readFileSync(require.resolve('../web-src/auth.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const sessionKey = 'frameio.app-session'
+test('Spectrum panel uses the official font provider and isolated Parcel-bundled styles', () => {
+  assert.ok(packageConfig.dependencies['@react-spectrum/s2'])
+  assert.equal(packageConfig['@parcel/resolver-default'].packageExports, true)
+  const bundle = packageConfig['@parcel/bundler-default'].manualSharedBundles.find(bundle => bundle.name === 's2-styles')
+  assert.deepEqual(bundle.types, ['css'])
+  assert.ok(bundle.assets.includes('**/@react-spectrum/s2/**'))
+  assert.ok(bundle.assets.includes('web-src/**/*.{js,jsx,ts,tsx}'))
+  const source = fs.readFileSync(require.resolve('../web-src/index.tsx'), 'utf8')
+  assert.match(source, /import \{ Provider \} from '@react-spectrum\/s2\/Provider'/)
+  assert.match(source, /<Provider colorScheme="light" background="base"/)
+  assert.match(source, /fontFamily: 'sans'/)
+  const stylesheet = fs.readFileSync(require.resolve('../web-src/styles.css'), 'utf8')
+  assert.match(stylesheet, /^@layer panel, _;\s*@layer panel \{/)
+  assert.match(stylesheet, /font-family: 'adobe-clean-spectrum-vf'/)
+  assert.doesNotThrow(() => require('lightningcss').transform({ filename: 'styles.css', code: Buffer.from(stylesheet) }))
+})
+
 function authClient(persistent = new Map(), tab = new Map(), blocked = {}) {
   function storage(values, unavailable) {
     const check = () => { if (unavailable) throw new Error('Storage blocked') }
@@ -43,6 +61,79 @@ test('hosted OAuth uses the pinned same-origin Stage proxy and rejects other ori
   location.origin = 'https://untrusted.invalid'
   await assert.rejects(exports.oauthRequest('session'), /Invalid authentication endpoint/)
   assert.equal(calls.length, 1)
+})
+
+test('local OAuth uses only the HTTPS localhost port 3000 origin', async () => {
+  const origin = 'https://localhost:3000'
+  const location = { hostname: 'localhost', origin, href: origin + '/index.html' }
+  const exports = {}
+  const calls = []
+  vm.runInNewContext(authCode, {
+    exports, require: () => ({ default: require('../web-src/public-config.json') }), location, URL, AbortSignal,
+    localStorage: { getItem: () => 'ab'.repeat(32) },
+    fetch: async (url, options) => {
+      calls.push({ url: url.href, credentials: options.credentials })
+      return Response.json({ authenticated: false })
+    }
+  })
+  await exports.oauthRequest('session')
+  assert.equal(calls[0].url, origin + '/api/oauth')
+  assert.equal(calls[0].credentials, 'omit')
+  for (const origin of ['https://localhost:3002', 'http://localhost:3000', 'https://www.localappbuilder.com:3000', 'https://localappbuilder:3000']) {
+    Object.assign(location, { hostname: new URL(origin).hostname, origin, href: origin + '/index.html' })
+    await assert.rejects(exports.oauthRequest('session'), /Invalid authentication endpoint/)
+  }
+  assert.equal(calls.length, 1)
+})
+
+test('development server rejects alternate ports without suggesting a fallback', () => {
+  for (const port of ['3001', '3002']) {
+    const result = spawnSync(process.execPath, [require.resolve('../scripts/dev.cjs'), '--port', port], { encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /Local development requires port 3000 on both the container and host/)
+  }
+  const settings = JSON.parse(fs.readFileSync(require.resolve('../.vscode/settings.json'), 'utf8'))
+  assert.equal(settings['remote.portsAttributes']['3000'].requireLocalPort, true)
+  assert.equal(settings['remote.portsAttributes']['3000'].protocol, 'https')
+})
+
+test('deployment and public OAuth endpoints remain pinned to hosted Stage', () => {
+  const origin = 'https://27200-msofficetoframe-stage.adobeio-static.net'
+  const config = fs.readFileSync(require.resolve('../app.config.yaml'), 'utf8')
+  assert.match(config, /FRAMEIO_REDIRECT_URI: https:\/\/27200-msofficetoframe-stage\.adobeio-static\.net\/oauth-callback\.html/)
+  assert.doesNotMatch(config, /localhost|localappbuilder|3002/)
+  const publicConfig = require('../web-src/public-config.json')
+  assert.equal(publicConfig.oauthUrl, origin + '/api/v1/web/msofficetoframe/oauth')
+  assert.equal(publicConfig.statusUrl, origin + '/api/v1/web/msofficetoframe/status')
+})
+
+test('OAuth configuration defaults to Stage and preserves explicit local OAuth without trusting historical export redirects', () => {
+  const script = fs.readFileSync(require.resolve('../scripts/configure-oauth.cjs'), 'utf8')
+  const stage = 'https://27200-msofficetoframe-stage.adobeio-static.net/oauth-callback.html'
+  for (const callback of [undefined, stage, 'https://localhost:3000/oauth-callback.html', 'https://www.localappbuilder.com:3000/oauth-callback.html']) {
+    let written
+    const process = {}
+    const errors = []
+    const files = {
+      existsSync: () => true,
+      readFileSync: name => name === '.env' ? (callback ? `FRAMEIO_REDIRECT_URI=${callback}\n` : '')
+        : JSON.stringify({ project: { workspace: { details: { credentials: [{ oauth2: { client_id: 'test-client', client_secret: 'test-secret', defaultRedirectUri: 'https://www.localappbuilder.com:3000/oauth-callback.html' } }] } } } }),
+      writeFileSync: (_name, content) => { written = content },
+      chmodSync: () => {}
+    }
+    vm.runInNewContext(script, {
+      require: name => name === 'node:fs' ? files : require(name), process,
+      console: { log: () => {}, error: message => errors.push(message) }
+    })
+    if (callback?.includes('www.localappbuilder.com')) {
+      assert.equal(process.exitCode, 1)
+      assert.equal(written, undefined)
+      assert.match(errors[0], /hosted Stage callback/)
+    } else {
+      assert.equal(process.exitCode, undefined)
+      assert.equal(require('dotenv').parse(written).FRAMEIO_REDIRECT_URI, callback || stage)
+    }
+  }
 })
 
 test('hosted manifest accepts a cache version without allowing arbitrary query parameters', () => {
@@ -170,7 +261,7 @@ test('Word App uses Office dialogs even without export and renders no slide prev
     const host = { kind: 'word', adapter, inOffice: true, available, reason: available ? '' : 'DOCX uploads require Word on Mac or Windows desktop.' }
     const element = (type, props) => ({ type, props })
     vm.runInNewContext(code, {
-      module, exports: module.exports, URL, moduleMeta: { url: 'https://www.localappbuilder.com:3000/index.html' }, AbortController,
+      module, exports: module.exports, URL, moduleMeta: { url: 'https://localhost:3000/index.html' }, AbortController,
       require: () => ({ jsx: element, jsxs: element }),
       useState: initial => { const index = stateIndex++; return [index === 0 ? host : index === 1 ? 'signed-out' : initial, value => changes.push(value)] },
       useRef: () => ({ current: null }), useEffect: callback => effects.push(callback),
@@ -310,11 +401,12 @@ test('manifest rejects insecure, placeholder and credential-bearing URLs', () =>
   }
 })
 
-test('custom-domain manifest keeps the task pane and assets on the chosen origin', () => {
-  const xml = createManifest('https://www.localappbuilder.com:3000/index.html')
+test('local manifest command keeps the task pane and assets on localhost port 3000', () => {
+  assert.equal(packageConfig.scripts['manifest:local'], 'node scripts/manifest.cjs --url https://localhost:3000/index.html --output office/manifest.local.xml')
+  const xml = createManifest('https://localhost:3000/index.html')
   const manifest = new XMLParser({ ignoreAttributes: false }).parse(xml).OfficeApp
-  assert.equal(manifest.DefaultSettings.SourceLocation['@_DefaultValue'], 'https://www.localappbuilder.com:3000/index.html')
-  assert.equal(manifest.IconUrl['@_DefaultValue'], 'https://www.localappbuilder.com:3000/assets/icon-32.png?v=frameio')
+  assert.equal(manifest.DefaultSettings.SourceLocation['@_DefaultValue'], 'https://localhost:3000/index.html')
+  assert.equal(manifest.IconUrl['@_DefaultValue'], 'https://localhost:3000/assets/icon-32.png?v=frameio')
 })
 
 test('secret scanner detects raw and encoded values without printing them', () => {

@@ -18,20 +18,20 @@ const oauthConfig = Object.fromEntries(Object.entries(privateConfig).filter(([ke
 const oauth = createHandler({ getStore: async () => localState(), getRegistry: async () => localRegistry() })
 
 const { values } = parseArgs({ options: { cert: { type: 'string' }, key: { type: 'string' }, port: { type: 'string', default: '3000' } } })
+const port = Number(values.port)
+if (port !== 3000) {
+  console.error('Local development requires port 3000 on both the container and host.')
+  process.exit(1)
+}
+const hostname = 'localhost'
 const cert = values.cert || path.resolve('.certs/localappbuilder.crt')
 const key = values.key || path.resolve('.certs/localappbuilder.key')
 if (!fs.existsSync(cert) || !fs.existsSync(key)) {
   console.error('HTTPS certificate missing. Run npm run certs, or pass --cert and --key paths. Trust the public certificate on the Office host.')
   process.exit(1)
 }
-const hostname = new URL(privateConfig.FRAMEIO_REDIRECT_URI || 'https://www.localappbuilder.com:3000/oauth-callback.html').hostname
 if (!new X509Certificate(fs.readFileSync(cert)).checkHost(hostname)) {
   console.error('HTTPS certificate does not cover the configured OAuth hostname.')
-  process.exit(1)
-}
-const port = Number(values.port)
-if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  console.error('Use a port between 1024 and 65535.')
   process.exit(1)
 }
 
@@ -87,7 +87,7 @@ const server = https.createServer({ cert: fs.readFileSync(cert), key: fs.readFil
 })
 
 server.on('error', error => {
-  console.error(`HTTPS server failed (${error.code || 'unknown error'}). Try --port 3001 if the port is occupied.`)
+  console.error(`HTTPS server failed (${error.code || 'unknown error'}). Ensure port 3000 is available; local development must use localhost:3000.`)
   if (watcher) watcher.kill()
   process.exitCode = 1
 })
