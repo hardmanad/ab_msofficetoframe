@@ -61,6 +61,9 @@ button { font: inherit; cursor: pointer; border-radius: 4px; }
 .upload-status { margin-top: 12px; overflow-wrap: anywhere; }
 .upload-status > p:first-child { display: flex; align-items: center; gap: 6px; }
 .upload-status progress { display: block; width: 100%; height: 8px; margin-top: 12px; accent-color: var(--accent); }
+.upload-progress { display: grid; grid-template-rows: 1fr; opacity: 1; transition: opacity .3s ease, grid-template-rows .3s ease; }
+.upload-progress.is-hidden { grid-template-rows: 0fr; opacity: 0; }
+.upload-progress-content { min-height: 0; overflow: hidden; }
 .check-upload { margin-top: 10px; }
 .upload-document-notice { padding: 9px 10px; background: #fff8e7; border-left: 2px solid #d7ad53; }
 .asset-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
@@ -74,4 +77,4 @@ button { font: inherit; cursor: pointer; border-radius: 4px; }
 footer { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); padding: 16px 20px; font-size: 10px; }
 .spin { animation: turn 1s linear infinite; }
 @keyframes turn { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } .upload-progress { transition: none; } }

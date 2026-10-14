@@ -28,6 +28,13 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
   const [entry, setEntry] = useState<RegistryEntry | null>(null)
   const [history, setHistory] = useState({ loading: false, checked: false, error: '', relinkAllowed: false })
   const [historyRetry, setHistoryRetry] = useState(0)
+  const [progressFaded, setProgressFaded] = useState(false)
+  useEffect(() => {
+    setProgressFaded(false)
+    if (state.phase !== 'complete') return
+    const timeout = window.setTimeout(() => setProgressFaded(true), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [state.phase])
   const expired = useRef(onSessionExpired)
   useEffect(() => { expired.current = onSessionExpired }, [onSessionExpired])
   const abort = useRef<AbortController | null>(null)
@@ -148,7 +155,9 @@ export function UploadPanel({ destination, presentationId, adapter, unavailableR
     <div className="picker-field"><label htmlFor="upload-name">Filename</label><div className="picker-control"><input id="upload-name" value={name} maxLength={180} disabled={busy || !adapter} onChange={event => setName(event.target.value)} spellCheck={false} /></div></div>
     {state.phase !== 'idle' && <div className="upload-status" role="status" aria-live="polite">
       <p className={state.phase === 'error' ? 'auth-error' : 'detail'}>{state.phase === 'complete' && <CircleCheck size={16} aria-hidden="true" />}{labels[state.phase]}</p>
-      {state.size > 0 && <><progress max={state.size} value={state.loaded} aria-label="Document bytes transferred" /><p className="detail">{formatBytes(state.loaded)} / {formatBytes(state.size)}</p></>}
+      {state.size > 0 && <div className={`upload-progress${state.phase === 'complete' && progressFaded ? ' is-hidden' : ''}`} aria-hidden={state.phase === 'complete' && progressFaded}>
+        <div className="upload-progress-content"><progress max={state.size} value={state.loaded} aria-label="Document bytes transferred" /><p className="detail">{formatBytes(state.loaded)} / {formatBytes(state.size)}</p></div>
+      </div>}
       {state.message && <p className="detail">{state.message}</p>}
     </div>}
     {reason && <p className="detail" id="upload-reason">{reason}</p>}

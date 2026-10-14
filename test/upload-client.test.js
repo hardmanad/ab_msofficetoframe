@@ -304,6 +304,8 @@ function uploadPane(options = {}) {
   let completed = false
   const registered = { presentationId: document.expected, documentType: options.historyType || adapter.documentType, state: 'complete', version: 1, accountId: 'account', projectId: 'project', folderId: 'folder', viewUrl: 'https://next.frame.io/file/file', name: adapter.defaultName }
   const states = [], refs = [], effects = []
+  const timers = new Map()
+  let now = 0, nextTimer = 0
   let stateIndex, refIndex, effectIndex, changed, pending, tree
   const props = { adapter: options.startup ? null : adapter, unavailableReason: '', available: true, signedIn: true, presentationId: document.expected,
     destination: { accountId: 'account', projectId: 'project', folderId: 'folder' }, onBusyChange: () => {}, onSessionExpired: () => {}, onAssetChange: () => {} }
@@ -334,6 +336,7 @@ function uploadPane(options = {}) {
       Object.assign(registered, { accountId: params.accountId, projectId: params.projectId, folderId: params.folderId })
       return { fileId: 'file', parts: [{ size: 8, url: parts[0].url }] }
     }
+    if (options.uploadOutcome) return { complete: false, failed: options.uploadOutcome === 'failed' }
     completed = true
     return { complete: true, failed: false, entry: registered }
   } }
@@ -344,6 +347,7 @@ function uploadPane(options = {}) {
   putPart: async (url, bytes, progress, signal, mimeType) => { calls.push({ operation: 'put', mimeType }) } }
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(require.resolve('../web-src/UploadPanel.tsx'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
     module, exports: module.exports, AbortController, URL, Error, crypto: require('node:crypto').webcrypto,
+    window: { setTimeout: (callback, milliseconds) => { timers.set(++nextTimer, { callback, time: now + milliseconds }); return nextTimer }, clearTimeout: timer => timers.delete(timer) },
     require: name => name === 'react' ? react : name === 'react/jsx-runtime' ? { jsx: element, jsxs: element } : name === './auth' ? auth : name === './office-document' ? document.exports : name === './upload-transfer' ? transfer : {}
   })
   function render() {
@@ -361,8 +365,58 @@ function uploadPane(options = {}) {
     if (Array.isArray(value)) return value.flatMap(child => elements(child))
     return [value, ...elements(value.props?.children)]
   }
-  return { calls, props, adapter, render, elements: () => elements(tree), find: predicate => elements(tree).find(predicate), settle: async () => { await new Promise(setImmediate); render() } }
+  return { calls, props, adapter, render, timers,
+    advance: milliseconds => { now += milliseconds; for (const [timer, value] of timers) if (value.time <= now) { timers.delete(timer); value.callback() }; render() },
+    unmount: () => effects.forEach(effect => effect?.cleanup?.()),
+    elements: () => elements(tree), find: predicate => elements(tree).find(predicate), settle: async () => { await new Promise(setImmediate); render() } }
 }
+
+for (const host of ['Word', 'PowerPoint']) test(`${host} fades completed upload progress after five seconds while keeping the completion message`, async () => {
+  const pane = uploadPane({ host, filename: host === 'Word' ? 'Report.docx' : 'Deck.pptx' })
+  pane.render()
+  await pane.settle()
+  assert.equal(pane.timers.size, 0)
+  const upload = () => pane.find(node => node.type === 'button' && node.props.className === 'upload')
+  const progress = () => pane.find(node => node.props?.className?.startsWith('upload-progress') && node.props.className !== 'upload-progress-content')
+  const status = () => pane.find(node => node.props?.className === 'upload-status')
+  await upload().props.onClick()
+  pane.render()
+  assert.equal(progress().props['aria-hidden'], false)
+  assert.equal(pane.timers.size, 1)
+  pane.advance(4999)
+  assert.equal(progress().props.className, 'upload-progress')
+  pane.advance(1)
+  assert.equal(progress().props.className, 'upload-progress is-hidden')
+  assert.equal(progress().props['aria-hidden'], true)
+  assert.equal(status().props.children[0].props.children[1], 'Upload complete')
+  assert.ok(status().props.children[0].props.children[0])
+  const nextUpload = upload().props.onClick()
+  pane.render()
+  assert.equal(pane.timers.size, 0)
+  await nextUpload
+  pane.render()
+  assert.equal(progress().props['aria-hidden'], false)
+  assert.equal(pane.timers.size, 1)
+  pane.unmount()
+  assert.equal(pane.timers.size, 0)
+})
+
+test('failed and pending uploads retain progress details without a completion timer', async () => {
+  for (const uploadOutcome of ['failed', 'pending']) {
+    const pane = uploadPane({ uploadOutcome })
+    pane.render()
+    await pane.settle()
+    await pane.find(node => node.type === 'button' && node.props.className === 'upload').props.onClick()
+    pane.render()
+    assert.equal(pane.timers.size, 0)
+    pane.advance(10000)
+    const progress = pane.find(node => node.props?.className === 'upload-progress')
+    assert.equal(progress.props['aria-hidden'], false)
+    const text = pane.elements().flatMap(node => node.props?.children || []).filter(value => typeof value === 'string').join(' ')
+    assert.match(text, uploadOutcome === 'failed' ? /Upload failed/ : /Confirmation pending/)
+    pane.unmount()
+  }
+})
 
 test('Word pane initializes after host detection and uploads DOCX without losing edited filenames', async () => {
   const pane = uploadPane({ startup: true })
