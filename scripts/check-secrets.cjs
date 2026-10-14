@@ -19,6 +19,7 @@ function collectSecrets() {
   function visit(object, sensitive = false) {
     if (!object || typeof object !== 'object') return
     for (const [key, value] of Object.entries(object)) {
+      if (key === 'redirect_uri' || key === 'defaultRedirectUri') continue
       const privateValue = sensitive || /auth|secret|token|password|credential|api.?key/i.test(key)
       if (typeof value === 'object') visit(value, privateValue)
       else if (privateValue) add(value)
@@ -67,4 +68,4 @@ function main() {
 if (require.main === module) {
   try { main() } catch (error) { console.error(error.message); process.exitCode = 1 }
 }
-module.exports = { hasSecret }
+module.exports = { hasSecret, collectSecrets }

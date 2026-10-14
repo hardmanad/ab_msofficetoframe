@@ -416,3 +416,27 @@ test('secret scanner detects raw and encoded values without printing them', () =
   }
   assert.equal(hasSecret('public health information', [secret]), false)
 })
+
+test('secret collection excludes public exported redirect metadata but retains credential secrets', () => {
+  const script = fs.readFileSync(require.resolve('../scripts/check-secrets.cjs'), 'utf8')
+  const callback = 'https://localhost:3000/oauth-callback.html'
+  const pattern = 'https://localhost:3000/oauth-callback\\.html'
+  const credential = {
+    client_secret: 'test-client-secret',
+    access_token: 'test-access-token',
+    redirect_uri: [pattern],
+    defaultRedirectUri: callback
+  }
+  const module = { exports: {} }
+  const files = {
+    existsSync: name => name === 'msofficetoframe-27200-Stage.json',
+    readFileSync: () => JSON.stringify({ credentials: [{ oauth2: credential }] })
+  }
+  vm.runInNewContext(script, { module, require: name => name === 'node:fs' ? files : require(name) })
+  const secrets = module.exports.collectSecrets()
+  assert.equal(hasSecret(callback, secrets), false)
+  assert.equal(hasSecret(pattern, secrets), false)
+  assert.equal(hasSecret('3000/oauth-callback.html', secrets), false)
+  assert.equal(hasSecret(credential.client_secret, secrets), true)
+  assert.equal(hasSecret(credential.access_token, secrets), true)
+})
